@@ -166,11 +166,14 @@ export function applyAction(state, playerId, action) {
       if (pend) return { error: 'כבר שלפת קלף' };
       const top = state.discard[state.discard.length - 1];
       if (!top || top.kind !== 'num') return { error: 'אפשר לקחת מהערימה רק קלף מספר' };
+      if (action.slot !== undefined && !validSlot(action.slot)) return { error: 'משבצת לא חוקית' };
       state.discard.pop();
       emit(state, { type: 'draw', pi, source: 'discard' });
       state.pending = { type: 'drawn', card: top, source: 'discard', remaining: 0 };
       state.highlight = null;
       addLog(state, `${me.name} לקח/ה ${top.value} מערימת הזריקה.`);
+      // Dragged straight onto a hand slot: take and place in one move.
+      if (action.slot !== undefined) return applyAction(state, playerId, { type: 'replace', slot: action.slot });
       return { privates };
     }
     case 'replace': {

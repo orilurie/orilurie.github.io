@@ -1,6 +1,6 @@
 import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js';
 import { hostTransport, clientTransport } from './net.js';
-import { snapshot, playEvents, turnFx, confetti } from './anim.js';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js';
 
 const $app = document.getElementById('app');
 const store = {
@@ -26,6 +26,8 @@ const ui = {
   reveal: null, // { slot, card }
   swapSlot: null,
   showLog: false,
+  dropFrom: null, // snapshot overrides so the next animation starts where a card was dropped
+  nextSwapSlot: null,
   lastEventId: undefined, // last game event already animated
   resultsReady: true, // false while the end-of-round reveal is playing
 };
@@ -130,7 +132,10 @@ function joinRoom(code) {
 
 function receive(msg) {
   if (msg.t === 'room') {
+    if (drag?.started) cancelDrag();
     const before = snapshot();
+    if (ui.dropFrom) Object.assign(before, ui.dropFrom); // animate from where the card was dropped
+    ui.dropFrom = null;
     const prev = ui.view;
     let fresh = [];
     if (msg.view) {
@@ -146,16 +151,20 @@ function receive(msg) {
     ui.view = msg.view;
     const key = ui.view && `${ui.view.round}-${ui.view.turn}-${ui.view.pending?.type}`;
     if (key !== prevTurnKey) ui.swapSlot = null;
+    if (ui.nextSwapSlot !== null && ui.view?.pending?.type === 'swap') ui.swapSlot = ui.nextSwapSlot;
+    ui.nextSwapSlot = null;
     ui.screen = msg.room.started ? 'game' : 'lobby';
     ui.error = '';
     history.replaceState(null, '', `?${new URLSearchParams({ ...localParam(), room: msg.room.code })}`);
     render();
     if (ui.view) animate(fresh, before, prev);
+    if (dropped) { clearTimeout(dropped.timer); dropped.clone.remove(); dropped = null; }
     return;
   } else if (msg.t === 'reveal') {
     ui.reveal = { slot: msg.slot, card: msg.card };
     setTimeout(() => { ui.reveal = null; render(); }, 4000);
   } else if (msg.t === 'error') {
+    if (dropped) { clearTimeout(dropped.timer); returnHome(dropped); dropped = null; }
     toast(msg.text);
     return;
   }
@@ -214,6 +223,7 @@ function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) 
 }
 
 function render() {
+  if (drag?.started) { ui.renderQueued = true; return; }
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting') {
     $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>מתחבר…</p></div>`;
@@ -221,6 +231,7 @@ function render() {
   }
   if (ui.screen === 'lobby') return renderLobby();
   renderGame();
+  for (const el of $app.querySelectorAll('.card[data-k]')) if (dragTargets(el.dataset.k)) el.classList.add('draggable');
 }
 
 function renderHome() {
@@ -248,6 +259,7 @@ function rulesHtml() {
     <li>החתולים (0–6) שווים מעט נקודות, והעכברים (7–9) שווים הרבה.</li>
     <li>קלפי כוח: 👁️ <b>הצצה</b> בקלף שלך · 🔄 <b>החלפה</b> של קלף שלך בקלף של יריב (בלי להסתכל) · ✌️ <b>שלוף 2</b>: עד שתי שליפות נוספות.</li>
     <li>אחרי סבב שלם אפשר לקרוא <b>"חתחתול!"</b> בתחילת התור. לכל השאר נשאר עוד תור אחד, ואז כל הקלפים נחשפים.</li>
+    <li>אפשר ללחוץ על קלפים או לגרור אותם. בזמן גרירה מסומנים כל המקומות שאפשר להניח בהם את הקלף.</li>
     <li>מי שסכום הקלפים שלו הכי נמוך מנצח בסיבוב. הנקודות מצטברות, והכי מעט נקודות בסוף הוא המנצח.</li>
   </ul>`;
 }
@@ -330,6 +342,9 @@ function renderGame() {
     if (myTurn && pend.card.kind === 'power') btns.push(`<button class="primary" data-act="usePower">השתמש</button>`);
     if (myTurn && pend.source === 'deck') btns.push(`<button data-act="discardDrawn">זרוק</button>`);
     drawn = `<div class="pile drawn"><div class="plabel">${myTurn ? 'הקלף שלך' : 'נשלף'}</div>${cardHtml(pend.card, { k: 'drawn' })}<div class="btns">${btns.join('')}</div></div>`;
+  } else {
+    // Empty spot that becomes the drop target when dragging a card off the deck.
+    drawn = `<div class="pile drawslot-pile"><div class="plabel">שלוף לכאן</div><div class="card dropslot" ${canDraw ? 'data-k="drawslot"' : ''}></div></div>`;
   }
 
   const controls = [];
@@ -371,6 +386,168 @@ function resultsHtml(v) {
     <button class="ghost" data-act="closeResults">הצג את השולחן</button>
   </div></div>`;
 }
+
+// ---------- Drag & drop ----------
+// Every drag maps to the same actions as clicking. Dropping outside a target returns the card.
+let drag = null; // in-progress drag
+let dropped = null; // card dropped on a target, waiting for the host's answer
+
+function dragTargets(key) {
+  const v = ui.view;
+  if (ui.screen !== 'game' || !v || v.phase !== 'play' || v.turn !== v.me) return null;
+  const pend = v.pending, me = v.me;
+  const act = (type, extra = {}) => send({ t: 'action', action: { type, ...extra } });
+  const mySlots = (hint, go) => [0, 1, 2, 3].map(s => ({ key: `h${me}-${s}`, hint, go: () => go(s) }));
+  const T = [];
+  if (key === 'deck' && (!pend || pend.type === 'draw2')) {
+    T.push({ key: 'drawslot', hint: 'שלוף', as: 'deck', go: () => act('drawDeck') });
+  } else if (key === 'discard' && !pend && v.discardTop?.kind === 'num') {
+    T.push(...mySlots('החלף', s => act('takeDiscard', { slot: s })).map(t => ({ ...t, as: 'drawn' })));
+  } else if (key === 'drawn' && pend?.type === 'drawn') {
+    const c = pend.card;
+    if (pend.source === 'deck') T.push({ key: 'discard', hint: 'זרוק', go: () => act('discardDrawn') });
+    if (c.kind === 'num') T.push(...mySlots('החלף', s => act('replace', { slot: s })));
+    else if (c.power === 'peek') T.push(...mySlots('הצץ', s => { act('usePower'); act('peek', { slot: s }); }));
+    else if (c.power === 'swap') T.push(...mySlots('להחלפה', s => { ui.nextSwapSlot = s; act('usePower'); }));
+    else if (c.power === 'draw2') T.push({ key: 'deck', hint: 'השתמש', go: () => act('usePower') });
+    T.forEach(t => { t.as = 'drawn'; });
+  } else if (pend?.type === 'swap' && /^h\d+-\d$/.test(key)) {
+    const [pi, slot] = key.slice(1).split('-').map(Number);
+    if (pi === me) {
+      v.players.forEach((p, i) => {
+        if (i !== me) for (let s = 0; s < 4; s++) T.push({ key: `h${i}-${s}`, hint: 'החלף', as: key, go: () => act('swap', { slot, target: i, targetSlot: s }) });
+      });
+    } else {
+      T.push(...mySlots('החלף', s => act('swap', { slot: s, target: pi, targetSlot: slot })).map(t => ({ ...t, as: key })));
+    }
+  }
+  return T.length ? T : null;
+}
+
+function startDrag() {
+  drag.started = true;
+  drag.targets = drag.targets
+    .map(t => ({ ...t, el: $app.querySelector(`[data-k="${t.key}"]`) }))
+    .filter(t => t.el);
+  for (const t of drag.targets) {
+    t.el.classList.add('drop-ok');
+    t.el.dataset.hint = t.hint;
+    t.el.closest('.drawslot-pile')?.classList.add('show');
+  }
+  document.body.classList.add('dragging');
+  drag.el.classList.add('drag-src');
+  const r = drag.rect;
+  const clone = document.createElement('div');
+  clone.className = 'drag-clone';
+  clone.style.cssText = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`;
+  clone.innerHTML = drag.el.outerHTML;
+  const c = clone.firstElementChild;
+  c.classList.remove(...STRIP);
+  c.removeAttribute('data-k');
+  c.style.setProperty('--w', r.width + 'px');
+  document.getElementById('fx').append(clone);
+  drag.clone = clone;
+  navigator.vibrate?.(15);
+}
+
+function hitTarget(x, y) {
+  let best = null, bestD = Infinity;
+  for (const t of drag.targets) {
+    const r = t.el.getBoundingClientRect();
+    const pad = 14;
+    if (x < r.left - pad || x > r.right + pad || y < r.top - pad || y > r.bottom + pad) continue;
+    const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+    if (d < bestD) { bestD = d; best = t; }
+  }
+  return best;
+}
+
+function clearDragUi() {
+  document.body.classList.remove('dragging');
+  for (const el of $app.querySelectorAll('.drop-ok, .drop-hover, .show')) {
+    el.classList.remove('drop-ok', 'drop-hover', 'show');
+    delete el.dataset.hint;
+  }
+}
+
+// Slides a dragged card back to where it came from.
+function returnHome({ clone, el, key, tilt = 0 }) {
+  const home = (el.isConnected ? el : $app.querySelector(`[data-k="${key}"]`)) || el;
+  const done = () => { clone.remove(); home.classList?.remove('drag-src'); };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !home.isConnected) return done();
+  const from = clone.getBoundingClientRect(), to = home.getBoundingClientRect();
+  clone.style.transform = '';
+  clone.style.left = to.left + 'px';
+  clone.style.top = to.top + 'px';
+  clone.animate([
+    { transform: `translate(${from.left - to.left}px,${from.top - to.top}px) rotate(${tilt}deg) scale(1.08)` },
+    { transform: 'translate(0,0) rotate(0) scale(1)' },
+  ], { duration: 380, easing: 'cubic-bezier(.3,1.35,.5,1)' }).finished.then(done);
+}
+
+function cancelDrag() {
+  const d = drag;
+  drag = null;
+  clearDragUi();
+  returnHome(d);
+  if (ui.renderQueued) { ui.renderQueued = false; render(); }
+}
+
+$app.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || drag || dropped) return;
+  const el = e.target.closest('.card[data-k].draggable');
+  const targets = el && dragTargets(el.dataset.k);
+  if (!targets) return;
+  drag = { el, key: el.dataset.k, targets, x0: e.clientX, y0: e.clientY, lastX: e.clientX, tilt: 0, rect: el.getBoundingClientRect(), started: false, pid: e.pointerId };
+});
+
+addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+  if (!drag.started) {
+    if (Math.hypot(dx, dy) < 6) return;
+    startDrag();
+  }
+  e.preventDefault();
+  drag.tilt = Math.max(-14, Math.min(14, drag.tilt * 0.8 + (e.clientX - drag.lastX) * 0.6));
+  drag.lastX = e.clientX;
+  drag.clone.style.transform = `translate(${dx}px,${dy}px) rotate(${drag.tilt}deg) scale(1.08)`;
+  const hit = hitTarget(e.clientX, e.clientY);
+  if (hit !== drag.hover) {
+    drag.hover?.el.classList.remove('drop-hover');
+    hit?.el.classList.add('drop-hover');
+    drag.hover = hit;
+  }
+}, { passive: false });
+
+addEventListener('pointerup', e => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  if (!drag.started) { drag = null; return; }
+  ui.justDragged = true;
+  setTimeout(() => { ui.justDragged = false; }, 0);
+  const hit = hitTarget(e.clientX, e.clientY);
+  if (!hit) return cancelDrag();
+  const d = drag;
+  drag = null;
+  clearDragUi();
+  const r = d.clone.getBoundingClientRect();
+  ui.dropFrom = { [hit.as || d.key]: { rect: r, html: d.el.outerHTML } };
+  dropped = { clone: d.clone, el: d.el, key: d.key, timer: setTimeout(() => { if (dropped) { returnHome(dropped); dropped = null; } }, 4000) };
+  ui.renderQueued = false;
+  hit.go();
+});
+
+addEventListener('pointercancel', e => {
+  if (drag && e.pointerId === drag.pid) {
+    if (drag.started) cancelDrag();
+    else drag = null;
+  }
+});
+
+// A drag must not also count as a click on the card it started from.
+$app.addEventListener('click', e => {
+  if (ui.justDragged) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 // ---------- Events ----------
 function onAct(el) {

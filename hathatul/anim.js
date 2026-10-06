@@ -5,7 +5,7 @@ const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const layer = () => document.getElementById('fx');
 const BACK = '<div class="card back"><span>🐾</span></div>';
-const STRIP = ['clickable', 'glow', 'hl', 'sel', 'revealed', 'pop'];
+export const STRIP = ['clickable', 'glow', 'hl', 'sel', 'revealed', 'pop', 'draggable', 'drag-src', 'drop-ok', 'drop-hover'];
 
 // Rect + html of every animatable element ([data-k]) currently on screen.
 export function snapshot() {
