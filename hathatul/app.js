@@ -1,7 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js';
-import { hostTransport, clientTransport } from './net.js';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=8';
+import { hostTransport, clientTransport } from './net.js?v=8';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=8';
 
+export const VERSION = 8; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -285,6 +286,7 @@ function renderHome() {
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>
       <details class="rules"><summary>איך משחקים?</summary>${rulesHtml()}</details>
+      <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
 
@@ -564,7 +566,18 @@ addEventListener('pointermove', e => {
 
 addEventListener('pointerup', e => {
   if (!drag || e.pointerId !== drag.pid) return;
-  if (!drag.started) { drag = null; return; }
+  if (!drag.started) {
+    // Touch on a draggable card: its touchstart was cancelled (to stop scrolling), so the
+    // browser sends no click. Treat the tap as the click here.
+    const el = drag.el;
+    drag = null;
+    if (e.pointerType !== 'mouse' && el.dataset.act) {
+      ui.justDragged = true; // swallow a click if the browser sends one anyway
+      setTimeout(() => { ui.justDragged = false; }, 400);
+      onAct(el);
+    }
+    return;
+  }
   ui.justDragged = true;
   setTimeout(() => { ui.justDragged = false; }, 0);
   const hit = hitTarget(e.clientX, e.clientY);
@@ -578,6 +591,12 @@ addEventListener('pointerup', e => {
   ui.renderQueued = false;
   hit.go();
 });
+
+// Stop the page from scrolling as soon as a finger lands on a draggable card. WebKit
+// (every iPhone browser, and in-app browsers) decides to scroll on touchstart.
+$app.addEventListener('touchstart', e => {
+  if (e.target.closest('.card.draggable')) e.preventDefault();
+}, { passive: false });
 
 // iOS Safari ignores touch-action on its own and scrolls the page instead of dragging;
 // cancelling the touch move while a card is held keeps the finger on the card.
