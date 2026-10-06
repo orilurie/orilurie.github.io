@@ -243,9 +243,10 @@ export function applyAction(state, playerId, action) {
 }
 
 // Redacted view of the state for one player.
-export function viewFor(state, playerId) {
+// revealAll: test room, every card face up.
+export function viewFor(state, playerId, { revealAll = false } = {}) {
   const pi = state.players.findIndex(p => p.id === playerId);
-  const reveal = state.phase === 'roundEnd';
+  const reveal = state.phase === 'roundEnd' || revealAll;
   const players = state.players.map((p, i) => ({
     id: p.id,
     name: p.name,

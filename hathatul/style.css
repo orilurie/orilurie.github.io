@@ -336,3 +336,12 @@ body.dragging #app .card.glow:not(.drop-ok) { outline: none; animation: none; }
   .cb-title { font-size: min(16vw, 26vh, 110px); }
   .cb-sub { font-size: 20px; margin-top: 8px; }
 }
+
+/* ---- test room ---- */
+select {
+  font: inherit; padding: 10px 12px; border-radius: 10px;
+  border: 2px solid var(--line); background: var(--bg); color: var(--ink);
+}
+.test-row button { flex: 1; }
+.top { gap: 8px; }
+.top > div:first-child { flex: 1; }

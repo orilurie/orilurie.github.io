@@ -117,6 +117,36 @@ function startHosting(code) {
   send = msg => handle('self', msg);
 }
 
+// ---------- Test room ----------
+// One person plays every seat, all cards face up. No network: the screen always shows the
+// seat whose turn it is, so the normal controls act for that player.
+function startTestRoom(n) {
+  const names = [ui.name || 'שחקן 1', ...Array.from({ length: n - 1 }, (_, i) => `שחקן ${i + 2}`)];
+  const ids = [pid, ...names.slice(1).map((_, i) => `test${i + 2}`)];
+  const game = createGame(ids.map((id, i) => ({ id, name: names[i] })));
+  const room = {
+    code: 'TEST', started: true, isHost: true, test: true,
+    players: names.map((name, i) => ({ name, connected: true, isHost: i === 0 })),
+  };
+  const push = () => {
+    const seat = game.players[game.turn].id;
+    receive({ t: 'room', room, view: viewFor(game, seat, { revealAll: true }) });
+  };
+  send = msg => {
+    if (msg.t !== 'action') return;
+    const { action } = msg;
+    if (action.type === 'ready') {
+      for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, action);
+      return push();
+    }
+    const res = applyAction(game, game.players[game.turn].id, action);
+    if (res.error) return receive({ t: 'error', text: res.error });
+    push();
+  };
+  ui.lastEventId = 0;
+  push();
+}
+
 // ---------- Client ----------
 function joinRoom(code) {
   const transport = clientTransport(code, {
@@ -155,7 +185,7 @@ function receive(msg) {
     ui.nextSwapSlot = null;
     ui.screen = msg.room.started ? 'game' : 'lobby';
     ui.error = '';
-    history.replaceState(null, '', `?${new URLSearchParams({ ...localParam(), room: msg.room.code })}`);
+    if (!msg.room.test) history.replaceState(null, '', `?${new URLSearchParams({ ...localParam(), room: msg.room.code })}`);
     render();
     if (ui.view) animate(fresh, before, prev);
     if (dropped) { clearTimeout(dropped.timer); dropped.clone.remove(); dropped = null; }
@@ -248,6 +278,12 @@ function renderHome() {
         <input id="code" maxlength="4" value="${esc(ui.joinCode)}" placeholder="קוד חדר" dir="ltr">
         <button data-act="join">הצטרף</button>
       </div>
+      <div class="or">או</div>
+      <div class="row test-row">
+        <button data-act="test">🧪 חדר בדיקה</button>
+        <select id="testN" aria-label="מספר שחקנים">${[2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
+      </div>
+      <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>
       <details class="rules"><summary>איך משחקים?</summary>${rulesHtml()}</details>
     </div>`;
 }
@@ -355,7 +391,8 @@ function renderGame() {
 
   $app.innerHTML = `
     <header class="top">
-      <div><b>חתחתול</b> · חדר <span dir="ltr">${ui.room.code}</span> · סיבוב ${v.round}</div>
+      <div><b>חתחתול</b> · ${ui.room.test ? '🧪 חדר בדיקה' : `חדר <span dir="ltr">${ui.room.code}</span>`} · סיבוב ${v.round}</div>
+      ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
       <button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>
     </header>
     ${v.calledBy !== null && v.phase === 'play' ? `<div class="lastcall">📣 ${esc(v.players[v.calledBy].name)} קרא/ה חתחתול! ${v.calledBy === v.me ? 'מחכים שכולם ישחקו תור אחרון…' : 'זה הסבב האחרון!'}</div>` : ''}
@@ -368,7 +405,7 @@ function renderGame() {
     <div class="status ${myTurn ? 'mine' : ''}">${statusText(v)}</div>
     <div class="controls">${controls.join('')}</div>
     <section class="me ${myTurn ? 'active' : ''}">
-      <div class="oname">${v.calledBy === v.me ? '📣 ' : ''}${esc(meP.name)} (את/ה) <span class="pts">${meP.total} נק׳</span></div>
+      <div class="oname">${v.calledBy === v.me ? '📣 ' : ''}${esc(meP.name)} ${ui.room.test ? "(בתור)" : "(את/ה)"} <span class="pts">${meP.total} נק׳</span></div>
       <div class="hand">${myHand}</div>
     </section>
     ${ui.showLog ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
@@ -582,6 +619,12 @@ function onAct(el) {
       return;
     }
     case 'start': return send({ t: 'start' });
+    case 'test': {
+      ui.name = document.getElementById('name').value.trim();
+      if (ui.name) store.set('hathatul-name', ui.name);
+      return startTestRoom(Number(document.getElementById('testN').value));
+    }
+    case 'exitTest': location.href = location.pathname + (localParam().local ? '?local=1' : ''); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
     case 'closeResults': document.querySelector('.overlay')?.remove(); return;
     case 'replace': extra = { slot: s }; return action('replace');
