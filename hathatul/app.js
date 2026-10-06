@@ -1,5 +1,6 @@
 import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js';
 import { hostTransport, clientTransport } from './net.js';
+import { snapshot, playEvents, turnFx, confetti } from './anim.js';
 
 const $app = document.getElementById('app');
 const store = {
@@ -25,6 +26,8 @@ const ui = {
   reveal: null, // { slot, card }
   swapSlot: null,
   showLog: false,
+  lastEventId: undefined, // last game event already animated
+  resultsReady: true, // false while the end-of-round reveal is playing
 };
 let send = () => {}; // sends a message to the host (or handles it locally when hosting)
 
@@ -127,6 +130,17 @@ function joinRoom(code) {
 
 function receive(msg) {
   if (msg.t === 'room') {
+    const before = snapshot();
+    const prev = ui.view;
+    let fresh = [];
+    if (msg.view) {
+      const evs = msg.view.events;
+      if (ui.lastEventId !== undefined) fresh = evs.filter(e => e.id > ui.lastEventId);
+      if (evs.length) ui.lastEventId = evs[evs.length - 1].id;
+    } else {
+      ui.lastEventId = 0; // in the lobby: animate everything from the first deal
+    }
+    if (fresh.some(e => e.type === 'roundEnd')) ui.resultsReady = false;
     ui.room = msg.room;
     const prevTurnKey = ui.view && `${ui.view.round}-${ui.view.turn}-${ui.view.pending?.type}`;
     ui.view = msg.view;
@@ -135,6 +149,9 @@ function receive(msg) {
     ui.screen = msg.room.started ? 'game' : 'lobby';
     ui.error = '';
     history.replaceState(null, '', `?${new URLSearchParams({ ...localParam(), room: msg.room.code })}`);
+    render();
+    if (ui.view) animate(fresh, before, prev);
+    return;
   } else if (msg.t === 'reveal') {
     ui.reveal = { slot: msg.slot, card: msg.card };
     setTimeout(() => { ui.reveal = null; render(); }, 4000);
@@ -143,6 +160,20 @@ function receive(msg) {
     return;
   }
   render();
+}
+
+function animate(fresh, before, prev) {
+  const v = ui.view;
+  const myTurn = x => x && x.phase === 'play' && x.turn === x.me;
+  playEvents(fresh, before, v).catch(() => {}).then(() => {
+    if (fresh.some(e => e.type === 'roundEnd')) {
+      ui.resultsReady = true;
+      render();
+      const meId = v.players[v.me].id;
+      if (v.results?.some(r => r.winner && r.id === meId)) confetti();
+    }
+    if (myTurn(ui.view) && !myTurn(prev)) turnFx();
+  });
 }
 
 function fail(text) {
@@ -170,8 +201,8 @@ function toast(text) {
 // ---------- Rendering ----------
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function cardHtml(c, { size = '', act = '', data = '', cls = '' } = {}) {
-  const attrs = `${act ? `data-act="${act}" role="button" tabindex="0"` : ''} ${data}`;
+function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) {
+  const attrs = `${act ? `data-act="${act}" role="button" tabindex="0"` : ''} ${data} ${k ? `data-k="${k}"` : ''}`;
   if (!c) return `<div class="card back ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><span>🐾</span></div>`;
   if (c.kind === 'power') {
     const p = POWERS[c.power];
@@ -274,7 +305,7 @@ function renderGame() {
       return `<div class="opp ${v.turn === i && v.phase === 'play' ? 'active' : ''}">
         <div class="oname">${v.calledBy === i ? '📣 ' : ''}${esc(p.name)}${conn} <span class="pts">${p.total} נק׳</span></div>
         <div class="ohand">${p.hand.map((c, s) => cardHtml(c, {
-          size: 'sm', cls: hl(i, s),
+          size: 'sm', cls: hl(i, s), k: `h${i}-${s}`,
           act: swapTarget ? 'swapTarget' : '', data: `data-p="${i}" data-s="${s}"`,
         })).join('')}</div>
         ${v.phase === 'peek' ? `<div class="tag">${p.ready ? '✓ מוכן/ה' : 'מציץ/ה…'}</div>` : ''}
@@ -288,7 +319,7 @@ function renderGame() {
     let card = c;
     if (ui.reveal && ui.reveal.slot === s && v.phase === 'play') card = ui.reveal.card;
     const sel = pend?.type === 'swap' && ui.swapSlot === s ? 'sel' : '';
-    return `<div class="slot">${cardHtml(card, { act: slotAct, data: `data-s="${s}"`, cls: `${hl(v.me, s)} ${sel} ${card && !c ? 'revealed' : ''}` })}<span>${s + 1}</span></div>`;
+    return `<div class="slot">${cardHtml(card, { act: slotAct, k: `h${v.me}-${s}`, data: `data-s="${s}"`, cls: `${hl(v.me, s)} ${sel} ${card && !c ? 'revealed' : ''}` })}<span>${s + 1}</span></div>`;
   }).join('');
 
   const canDraw = myTurn && (!pend || pend.type === 'draw2');
@@ -298,7 +329,7 @@ function renderGame() {
     const btns = [];
     if (myTurn && pend.card.kind === 'power') btns.push(`<button class="primary" data-act="usePower">השתמש</button>`);
     if (myTurn && pend.source === 'deck') btns.push(`<button data-act="discardDrawn">זרוק</button>`);
-    drawn = `<div class="pile drawn"><div class="plabel">${myTurn ? 'הקלף שלך' : 'נשלף'}</div>${cardHtml(pend.card, { cls: 'pop' })}<div class="btns">${btns.join('')}</div></div>`;
+    drawn = `<div class="pile drawn"><div class="plabel">${myTurn ? 'הקלף שלך' : 'נשלף'}</div>${cardHtml(pend.card, { k: 'drawn' })}<div class="btns">${btns.join('')}</div></div>`;
   }
 
   const controls = [];
@@ -311,10 +342,11 @@ function renderGame() {
       <div><b>חתחתול</b> · חדר <span dir="ltr">${ui.room.code}</span> · סיבוב ${v.round}</div>
       <button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>
     </header>
+    ${v.calledBy !== null && v.phase === 'play' ? `<div class="lastcall">📣 ${esc(v.players[v.calledBy].name)} קרא/ה חתחתול! ${v.calledBy === v.me ? 'מחכים שכולם ישחקו תור אחרון…' : 'זה הסבב האחרון!'}</div>` : ''}
     <section class="opps">${opps}</section>
     <section class="table">
-      <div class="pile"><div class="plabel">קופה (${v.deckCount})</div>${cardHtml(null, { act: canDraw ? 'drawDeck' : '', cls: canDraw ? 'glow' : '' })}</div>
-      <div class="pile"><div class="plabel">ערימת זריקה</div>${v.discardTop ? cardHtml(v.discardTop, { act: canTake ? 'takeDiscard' : '', cls: canTake ? 'glow' : '' }) : '<div class="card empty"></div>'}</div>
+      <div class="pile"><div class="plabel">קופה (${v.deckCount})</div>${cardHtml(null, { act: canDraw ? 'drawDeck' : '', cls: canDraw ? 'glow' : '', k: 'deck' })}</div>
+      <div class="pile"><div class="plabel">ערימת זריקה</div>${v.discardTop ? cardHtml(v.discardTop, { act: canTake ? 'takeDiscard' : '', cls: canTake ? 'glow' : '', k: 'discard' }) : '<div class="card empty" data-k="discard"></div>'}</div>
       ${drawn}
     </section>
     <div class="status ${myTurn ? 'mine' : ''}">${statusText(v)}</div>
@@ -324,12 +356,12 @@ function renderGame() {
       <div class="hand">${myHand}</div>
     </section>
     ${ui.showLog ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
-    ${v.phase === 'roundEnd' ? resultsHtml(v) : ''}`;
+    ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}`;
 }
 
 function resultsHtml(v) {
   const rows = v.results.slice().sort((a, b) => a.total - b.total)
-    .map(r => `<tr class="${r.winner ? 'win' : ''}"><td>${r.winner ? '🏆 ' : ''}${esc(r.name)}</td><td>${r.score}</td><td>${r.total}</td></tr>`).join('');
+    .map((r, i) => `<tr class="${r.winner ? 'win' : ''}" style="--i:${i}"><td>${r.winner ? '<span class="trophy">🏆</span> ' : ''}${esc(r.name)}</td><td>${r.score}</td><td>${r.total}</td></tr>`).join('');
   const hands = v.players.map(p => `<div class="rhand"><span>${esc(p.name)}</span><div>${p.hand.map(c => cardHtml(c, { size: 'xs' })).join('')}</div></div>`).join('');
   return `<div class="overlay"><div class="panel results">
     <h2>סוף סיבוב ${v.round}</h2>

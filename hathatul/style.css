@@ -124,7 +124,6 @@ input:focus { outline: none; border-color: var(--accent); }
 .card.hl { box-shadow: 0 0 0 4px var(--hl), var(--shadow); }
 .card.sel { transform: translateY(-10px); outline: 4px solid var(--accent); outline-offset: 2px; }
 .card.revealed { animation: flip .35s ease-out; box-shadow: 0 0 0 4px var(--hl), var(--shadow); }
-.card.pop { animation: pop .3s ease-out; }
 
 /* ---- game layout ---- */
 .top { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: .9rem; margin-bottom: 10px; }
@@ -190,6 +189,68 @@ input:focus { outline: none; border-color: var(--accent); }
   .hand { gap: 8px; }
   .table { gap: 14px; padding: 14px 8px; }
   .panel { padding: 18px; }
+}
+
+/* ---- animation layer ---- */
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; overflow: hidden; }
+.ghost { position: fixed; perspective: 900px; will-change: transform; }
+.ghost > .card { width: 100%; height: 100%; transform-style: preserve-3d; box-shadow: none; }
+.burst { position: fixed; font-size: 48px; pointer-events: none; }
+.confetti { position: fixed; top: 0; border-radius: 2px; }
+button { transition: transform .1s, border-color .15s; }
+button:active:not(:disabled) { transform: scale(.95); }
+.opp { transition: border-color .3s, transform .3s; }
+.opp.active { transform: translateY(-3px); animation: activeGlow 1.6s ease-in-out infinite; }
+.me.active { animation: activeGlow 1.6s ease-in-out infinite; }
+.lastcall {
+  background: var(--err); color: #fff; font-weight: 800; text-align: center;
+  border-radius: 12px; padding: 8px 12px; margin-bottom: 10px;
+  animation: lastPulse 1.2s ease-in-out infinite;
+}
+.overlay { animation: fadeIn .35s ease-out both; }
+.overlay .panel { animation: panelIn .45s cubic-bezier(.2,1.4,.4,1) both; }
+.results tbody tr { animation: rowIn .4s ease-out both; animation-delay: calc(.3s + var(--i) * .12s); }
+.trophy { display: inline-block; animation: trophy 1s cubic-bezier(.2,1.6,.4,1) .6s both; }
+.rhand .card { animation: pop .3s ease-out both; }
+
+/* ---- חתחתול announcement ---- */
+.call-banner {
+  position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, rgba(198, 40, 40, .55), rgba(0, 0, 0, .75));
+  animation: fadeIn .25s ease-out both; pointer-events: none;
+}
+.call-banner.out { animation: fadeOut .45s ease-in both; }
+.cb-inner { text-align: center; color: #fff; animation: shake .5s .55s ease-in-out 2; }
+.cb-mega { font-size: 72px; animation: megaIn .5s cubic-bezier(.2,1.8,.4,1) both; }
+.cb-title {
+  font-size: clamp(56px, 18vw, 120px); font-weight: 800; line-height: 1;
+  color: var(--hl); text-shadow: 0 6px 0 #a63d3a, 0 10px 30px rgba(0, 0, 0, .5);
+  animation: titleIn .6s cubic-bezier(.2,1.7,.4,1) .1s both;
+}
+.cb-sub { font-size: 24px; font-weight: 800; margin-top: 14px; animation: rowIn .4s ease-out .45s both; }
+.cb-note {
+  display: inline-block; margin-top: 12px; background: #fff; color: var(--err); font-weight: 800;
+  padding: 6px 16px; border-radius: 999px; animation: rowIn .4s ease-out .7s both;
+}
+.cb-paws i {
+  position: absolute; left: 50%; top: 50%; font-style: normal; font-size: 30px;
+  animation: pawOut 1.3s cubic-bezier(.1,.7,.3,1) var(--d) both;
+}
+
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes panelIn { from { transform: scale(.7) translateY(30px); opacity: 0; } }
+@keyframes rowIn { from { transform: translateY(14px); opacity: 0; } }
+@keyframes trophy { from { transform: scale(0) rotate(-40deg); } }
+@keyframes activeGlow { 50% { box-shadow: 0 0 0 4px rgba(255, 138, 61, .35), var(--shadow); } }
+@keyframes lastPulse { 50% { transform: scale(1.03); filter: brightness(1.15); } }
+@keyframes megaIn { from { transform: scale(0) rotate(-30deg); } }
+@keyframes titleIn { from { transform: scale(3) rotate(8deg); opacity: 0; } }
+@keyframes shake { 20% { transform: translateX(-10px) rotate(-2deg); } 40% { transform: translateX(10px) rotate(2deg); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
+@keyframes pawOut {
+  from { transform: translate(-50%, -50%) scale(.2); opacity: 0; }
+  30% { opacity: 1; }
+  to { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.3) rotate(var(--r)); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

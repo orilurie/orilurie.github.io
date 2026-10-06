@@ -34,6 +34,8 @@ export function createGame(players, rnd = Math.random) {
     starter: -1,
     players: players.map(p => ({ id: p.id, name: p.name, hand: [], total: 0 })),
     log: [],
+    events: [],
+    eventSeq: 0,
   };
   dealRound(state);
   return state;
@@ -56,7 +58,14 @@ function dealRound(state) {
   state.calledBy = null;
   state.results = null;
   state.highlight = null;
+  emit(state, { type: 'deal' });
   addLog(state, `סיבוב ${state.round} מתחיל! כל אחד מציץ בשני הקלפים החיצוניים שלו.`);
+}
+
+// Events tell clients what just happened, so they can animate it. Contain only public info.
+function emit(state, ev) {
+  state.events.push({ ...ev, id: ++state.eventSeq });
+  if (state.events.length > 12) state.events.shift();
 }
 
 function addLog(state, text) {
@@ -69,6 +78,7 @@ function drawFromDeck(state) {
     const top = state.discard.pop();
     state.deck = shuffle(state.discard, state.rnd);
     state.discard = [top];
+    emit(state, { type: 'reshuffle' });
     addLog(state, 'הקופה נגמרה – ערבבנו מחדש את ערימת הזריקה.');
   }
   return state.deck.shift();
@@ -98,6 +108,7 @@ function endRound(state) {
   });
   const best = Math.min(...results.map(r => r.score));
   state.results = results.map(r => ({ ...r, winner: r.score === best }));
+  emit(state, { type: 'roundEnd' });
   addLog(state, `הסיבוב נגמר! ${state.results.filter(r => r.winner).map(r => r.name).join(', ')} עם הכי מעט נקודות.`);
 }
 
@@ -111,6 +122,7 @@ export function applyAction(state, playerId, action) {
   if (action.type === 'ready') {
     if (state.phase !== 'peek') return { error: 'לא בשלב ההצצה' };
     state.ready.add(playerId);
+    emit(state, { type: 'ready', pi });
     if (state.ready.size === state.players.length) {
       state.phase = 'play';
       addLog(state, `כולם מוכנים. ${state.players[state.turn].name} מתחיל/ה.`);
@@ -135,6 +147,7 @@ export function applyAction(state, playerId, action) {
       if (state.calledBy !== null) return { error: 'מישהו כבר קרא חתחתול' };
       if (state.turnsTaken < state.players.length) return { error: 'אפשר לקרוא חתחתול רק אחרי סבב שלם' };
       state.calledBy = pi;
+      emit(state, { type: 'call', pi });
       addLog(state, `${me.name} קרא/ה חתחתול! לכל השאר נשאר תור אחרון.`);
       state.highlight = null;
       endTurn(state);
@@ -144,6 +157,7 @@ export function applyAction(state, playerId, action) {
       if (pend && pend.type !== 'draw2') return { error: 'כבר שלפת קלף' };
       const remaining = pend ? pend.remaining - 1 : 0;
       const card = drawFromDeck(state);
+      emit(state, { type: 'draw', pi, source: 'deck' });
       state.pending = { type: 'drawn', card, source: 'deck', remaining };
       state.highlight = null;
       return { privates };
@@ -153,6 +167,7 @@ export function applyAction(state, playerId, action) {
       const top = state.discard[state.discard.length - 1];
       if (!top || top.kind !== 'num') return { error: 'אפשר לקחת מהערימה רק קלף מספר' };
       state.discard.pop();
+      emit(state, { type: 'draw', pi, source: 'discard' });
       state.pending = { type: 'drawn', card: top, source: 'discard', remaining: 0 };
       state.highlight = null;
       addLog(state, `${me.name} לקח/ה ${top.value} מערימת הזריקה.`);
@@ -164,6 +179,7 @@ export function applyAction(state, playerId, action) {
       const old = me.hand[action.slot];
       me.hand[action.slot] = pend.card;
       state.discard.push(old);
+      emit(state, { type: 'replace', pi, slot: action.slot });
       state.highlight = { players: [{ pi, slot: action.slot }] };
       addLog(state, `${me.name} החליף/ה קלף ${action.slot + 1} וזרק/ה ${cardName(old)}.`);
       endTurn(state);
@@ -173,6 +189,7 @@ export function applyAction(state, playerId, action) {
       if (!pend || pend.type !== 'drawn') return { error: 'אין קלף לזרוק' };
       if (pend.source === 'discard') return { error: 'קלף מערימת הזריקה חייב להיכנס ליד' };
       state.discard.push(pend.card);
+      emit(state, { type: 'discard', pi });
       addLog(state, `${me.name} זרק/ה ${cardName(pend.card)}.`);
       if (pend.remaining > 0) {
         state.pending = { type: 'draw2', remaining: pend.remaining };
@@ -185,6 +202,7 @@ export function applyAction(state, playerId, action) {
       if (!pend || pend.type !== 'drawn' || pend.card.kind !== 'power') return { error: 'אין קלף כוח לשימוש' };
       const power = pend.card.power;
       state.discard.push(pend.card);
+      emit(state, { type: 'power', pi, power });
       addLog(state, `${me.name} משתמש/ת ב${POWERS[power].label}.`);
       state.pending = power === 'draw2' ? { type: 'draw2', remaining: 2 } : { type: power };
       return { privates };
@@ -194,6 +212,7 @@ export function applyAction(state, playerId, action) {
       if (!validSlot(action.slot)) return { error: 'משבצת לא חוקית' };
       privates.push({ to: playerId, msg: { t: 'reveal', slot: action.slot, card: me.hand[action.slot] } });
       state.highlight = { players: [{ pi, slot: action.slot }] };
+      emit(state, { type: 'peek', pi, slot: action.slot });
       addLog(state, `${me.name} הציץ/ה בקלף ${action.slot + 1} שלו/ה.`);
       endTurn(state);
       return { privates };
@@ -206,6 +225,7 @@ export function applyAction(state, playerId, action) {
       const other = state.players[ti];
       [me.hand[action.slot], other.hand[action.targetSlot]] = [other.hand[action.targetSlot], me.hand[action.slot]];
       state.highlight = { players: [{ pi, slot: action.slot }, { pi: ti, slot: action.targetSlot }] };
+      emit(state, { type: 'swap', a: { pi, slot: action.slot }, b: { pi: ti, slot: action.targetSlot } });
       addLog(state, `${me.name} החליף/ה את קלף ${action.slot + 1} שלו/ה עם קלף ${action.targetSlot + 1} של ${other.name}.`);
       endTurn(state);
       return { privates };
@@ -253,5 +273,6 @@ export function viewFor(state, playerId) {
     results: state.results,
     highlight: state.highlight,
     log: state.log.slice(-12),
+    events: state.events,
   };
 }
