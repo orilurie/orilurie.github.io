@@ -193,8 +193,8 @@ input:focus { outline: none; border-color: var(--accent); }
 
 /* ---- animation layer ---- */
 #fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; overflow: hidden; }
-.ghost { position: fixed; perspective: 900px; will-change: transform; }
-.ghost > .card { width: 100%; height: 100%; transform-style: preserve-3d; box-shadow: none; }
+.fly-ghost { position: fixed; perspective: 900px; will-change: transform; }
+.fly-ghost > .card { width: 100%; height: 100%; transform-style: preserve-3d; box-shadow: none; }
 .burst { position: fixed; font-size: 48px; pointer-events: none; }
 .confetti { position: fixed; top: 0; border-radius: 2px; }
 button { transition: transform .1s, border-color .15s; }
@@ -279,3 +279,60 @@ body.dragging #app .card:not(.drop-ok):not(.drag-src) { opacity: .45; }
 @keyframes dropPulse { 50% { outline-offset: 6px; outline-color: var(--accent); } }
 body.dragging #app .card.glow:not(.drop-ok) { outline: none; animation: none; }
 .card.sm.drop-ok[data-hint]::after { font-size: 10px; padding: 0 5px; bottom: -19px; }
+
+/* ---- phone held sideways: two columns, everything on one screen ---- */
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.game {
+    max-width: none; height: 100vh; height: 100dvh; padding: 6px 14px;
+    display: grid; gap: 6px 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr auto auto;
+    grid-template-areas:
+      "top top"
+      "lastcall lastcall"
+      "opps opps"
+      "me table"
+      "status table"
+      "controls table";
+  }
+  #app.game > .top { grid-area: top; margin: 0; font-size: .8rem; }
+  #app.game > .top .ghost { padding: 2px 8px; }
+  #app.game > .lastcall { grid-area: lastcall; margin: 0; padding: 4px 10px; font-size: .85rem; }
+  #app.game > .opps { grid-area: opps; flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 2px 2px 4px; }
+  #app.game > .table { grid-area: table; margin: 0; min-height: 0; padding: 10px; align-items: center; align-content: center; gap: 16px; }
+  #app.game > .me { grid-area: me; padding: 6px 10px 22px; align-self: end; }
+  #app.game > .status { grid-area: status; min-height: 0; padding: 6px 10px; font-size: .9rem; }
+  #app.game > .controls { grid-area: controls; margin: 0; }
+  #app.game > .controls button { padding: 6px 14px; }
+  #app.game > .log {
+    position: fixed; top: 34px; left: 10px; width: min(320px, 45vw); max-height: calc(100dvh - 44px);
+    margin: 0; z-index: 15; box-shadow: var(--shadow);
+  }
+  #app.game > .opps { justify-content: safe center; }
+  .opp { padding: 4px 8px; flex-shrink: 0; }
+  .opps:has(> .opp:nth-child(4)) .card.sm { --w: 23px; }
+  .opps:has(> .opp:nth-child(4)) .ohand { gap: 3px; }
+  .opps:has(> .opp:nth-child(4)) .opp { padding: 4px 6px; }
+  .opp .oname { margin-bottom: 3px; font-size: .8rem; }
+  .opp .tag { margin-top: 2px; }
+  .me .oname { margin-bottom: 4px; font-size: .85rem; }
+  .card { --w: 56px; }
+  .card.sm { --w: 28px; }
+  .card.sm span { display: none; }
+  .hand { gap: 10px; }
+  .plabel { font-size: .72rem; }
+
+  .overlay { padding: 8px; }
+  .overlay .panel.results {
+    max-width: 760px; padding: 14px 18px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;
+  }
+  .results h2 { grid-column: 1 / -1; margin-bottom: 6px; }
+  .results table { margin: 0 0 8px; }
+  .results th, .results td { padding: 4px 8px; }
+  .results button, .results .sub { grid-column: 1 / -1; }
+
+  .cb-mega { font-size: 44px; }
+  .cb-title { font-size: min(16vw, 26vh, 110px); }
+  .cb-sub { font-size: 20px; margin-top: 8px; }
+}

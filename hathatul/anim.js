@@ -21,7 +21,7 @@ const center = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
 
 function makeGhost(html, rect) {
   const g = document.createElement('div');
-  g.className = 'ghost';
+  g.className = 'fly-ghost';
   g.style.cssText = `left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
   setFace(g, html, rect.width);
   layer().append(g);

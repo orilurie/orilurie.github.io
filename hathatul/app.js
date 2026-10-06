@@ -224,6 +224,7 @@ function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) 
 
 function render() {
   if (drag?.started) { ui.renderQueued = true; return; }
+  $app.classList.toggle('game', ui.screen === 'game');
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting') {
     $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>מתחבר…</p></div>`;
