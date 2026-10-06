@@ -550,6 +550,10 @@ addEventListener('pointermove', e => {
   drag.tilt = Math.max(-14, Math.min(14, drag.tilt * 0.8 + (e.clientX - drag.lastX) * 0.6));
   drag.lastX = e.clientX;
   drag.clone.style.transform = `translate(${dx}px,${dy}px) rotate(${drag.tilt}deg) scale(1.08)`;
+  // Near the top/bottom edge, scroll so targets off-screen can be reached.
+  const edge = 60;
+  if (e.clientY > innerHeight - edge) scrollBy(0, 14);
+  else if (e.clientY < edge) scrollBy(0, -14);
   const hit = hitTarget(e.clientX, e.clientY);
   if (hit !== drag.hover) {
     drag.hover?.el.classList.remove('drop-hover');
@@ -574,6 +578,12 @@ addEventListener('pointerup', e => {
   ui.renderQueued = false;
   hit.go();
 });
+
+// iOS Safari ignores touch-action on its own and scrolls the page instead of dragging;
+// cancelling the touch move while a card is held keeps the finger on the card.
+addEventListener('touchmove', e => {
+  if (drag) e.preventDefault();
+}, { passive: false });
 
 addEventListener('pointercancel', e => {
   if (drag && e.pointerId === drag.pid) {

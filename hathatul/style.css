@@ -345,3 +345,4 @@ select {
 .test-row button { flex: 1; }
 .top { gap: 8px; }
 .top > div:first-child { flex: 1; }
+.card.draggable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
