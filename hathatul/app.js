@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=12';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=12';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=12';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=13';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=13';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=13';
 
-export const VERSION = 12; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 13; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -456,23 +456,12 @@ function resultsHtml(v) {
   </div></div>`;
 }
 
-// ---------- Diagnostics (?debug=1) ----------
-// Shows what the browser reports during touches, to diagnose devices we can't test on.
+// ---------- Debug (?debug=1) ----------
+// Enables the test room; diagnostics go to the browser console only.
 const debugOn = new URLSearchParams(location.search).has('debug');
-const dbgLines = [];
 function dbg(text) {
-  if (!debugOn) return;
-  dbgLines.push(`${(performance.now() / 1000).toFixed(2)} ${text}`);
-  if (dbgLines.length > 12) dbgLines.shift();
-  let el = document.getElementById('dbg');
-  if (!el) {
-    el = document.createElement('pre');
-    el.id = 'dbg';
-    document.body.append(el);
-  }
-  el.textContent = `v${VERSION} ${navigator.userAgent.slice(0, 90)}\nscrollY=${Math.round(scrollY)} lock=${lockedY !== null}\n` + dbgLines.join('\n');
+  if (debugOn) console.debug('[hathatul]', text);
 }
-if (debugOn) addEventListener('scroll', () => dbg('scroll'), { passive: true });
 setNetLog(text => dbg('net ' + text));
 
 // ---------- Drag & drop ----------
