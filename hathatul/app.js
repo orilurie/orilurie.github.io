@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=10';
-import { hostTransport, clientTransport } from './net.js?v=10';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=10';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=11';
+import { hostTransport, clientTransport } from './net.js?v=11';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=11';
 
-export const VERSION = 10; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 11; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -94,6 +94,7 @@ function startHosting(code) {
   };
 
   transport = hostTransport(code, {
+    onReconnect: broadcast, // players may have missed updates while the host was offline
     onReady() {
       cidToPid.set('self', pid);
       handle('self', { t: 'join', pid, name: ui.name });
@@ -152,15 +153,36 @@ function startTestRoom(n) {
 
 // ---------- Client ----------
 function joinRoom(code) {
-  const transport = clientTransport(code, {
-    onOpen() { transport.send({ t: 'join', pid, name: ui.name }); },
-    onData: receive,
+  const join = () => transport.send({ t: 'join', pid, name: ui.name });
+  let answered = false;
+  const transport = clientTransport(code, pid, {
+    onOpen: join, // also after every reconnect, so the host re-sends the current state
+    onData(msg) {
+      if (msg.t === 'room') answered = true;
+      receive(msg);
+    },
     onClose() { fail('החיבור למארח נותק'); },
     onError(err) {
       fail(err.type === 'peer-unavailable' ? 'לא נמצא חדר עם הקוד הזה' : 'שגיאת חיבור: ' + (err.type || err.message));
     },
   });
   send = msg => transport.send(msg);
+  // Keep asking until the host answers: the host's phone may be briefly away (e.g. sharing
+  // the link), and messages sent meanwhile are not kept by the relay.
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    if (answered || ui.screen !== 'connecting') return clearInterval(timer);
+    const secs = (Date.now() - t0) / 1000;
+    join();
+    if (secs > 45) {
+      clearInterval(timer);
+      transport.close();
+      fail(`המארח של חדר ${code} לא עונה. ודאו שהקוד נכון ושהמשחק פתוח אצל המארח על המסך, ונסו שוב.`);
+    } else if (secs > 6) {
+      ui.connectMsg = `מחכים למארח של חדר ${code}…<br><small>ודאו שהמשחק פתוח אצלו על המסך</small>`;
+      render();
+    }
+  }, 2500);
 }
 
 function receive(msg) {
@@ -197,6 +219,7 @@ function receive(msg) {
     ui.reveal = { slot: msg.slot, card: msg.card };
     setTimeout(() => { ui.reveal = null; render(); }, 4000);
   } else if (msg.t === 'error') {
+    if (ui.screen === 'connecting') return fail(msg.text); // e.g. the game already started
     if (dropped) { clearTimeout(dropped.timer); returnHome(dropped); dropped = null; }
     toast(msg.text);
     return;
@@ -260,7 +283,8 @@ function render() {
   $app.classList.toggle('game', ui.screen === 'game');
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting') {
-    $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>מתחבר…</p></div>`;
+    $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>${ui.connectMsg || 'מתחבר…'}</p>
+      <button class="ghost" data-act="cancelJoin">ביטול</button></div>`;
     return;
   }
   if (ui.screen === 'lobby') return renderLobby();
@@ -708,6 +732,7 @@ function onAct(el) {
       if (!name) { ui.error = 'נא להזין שם'; return render(); }
       ui.name = name;
       store.set('hathatul-name', name);
+      ui.connectMsg = '';
       if (act === 'join') {
         const code = document.getElementById('code').value.trim().toUpperCase();
         if (code.length !== 4) { ui.error = 'קוד חדר צריך להיות 4 אותיות'; return render(); }
@@ -727,6 +752,7 @@ function onAct(el) {
       return;
     }
     case 'start': return send({ t: 'start' });
+    case 'cancelJoin': location.href = location.pathname + (localParam().local ? '?local=1' : ''); return;
     case 'test': {
       ui.name = document.getElementById('name').value.trim();
       if (ui.name) store.set('hathatul-name', ui.name);
