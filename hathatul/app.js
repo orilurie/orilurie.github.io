@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=11';
-import { hostTransport, clientTransport } from './net.js?v=11';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=11';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=12';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=12';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=12';
 
-export const VERSION = 11; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 12; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -210,7 +210,7 @@ function receive(msg) {
     ui.nextSwapSlot = null;
     ui.screen = msg.room.started ? 'game' : 'lobby';
     ui.error = '';
-    if (!msg.room.test) history.replaceState(null, '', `?${new URLSearchParams({ ...localParam(), room: msg.room.code })}`);
+    if (!msg.room.test) history.replaceState(null, '', `?${new URLSearchParams({ ...ownParams(), room: msg.room.code })}`);
     render();
     if (ui.view) animate(fresh, before, prev);
     if (dropped) { clearTimeout(dropped.timer); dropped.clone.remove(); dropped = null; }
@@ -252,6 +252,9 @@ function fail(text) {
 }
 
 const localParam = () => (new URLSearchParams(location.search).has('local') ? { local: '1' } : {});
+// local + debug: kept when moving between screens (debug is not put in links shared with friends)
+const ownParams = () => ({ ...localParam(), ...(new URLSearchParams(location.search).has('debug') ? { debug: '1' } : {}) });
+const homeUrl = () => location.pathname + (Object.keys(ownParams()).length ? `?${new URLSearchParams(ownParams())}` : '');
 const randomCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
 
 let toastTimer;
@@ -305,12 +308,12 @@ function renderHome() {
         <input id="code" maxlength="4" value="${esc(ui.joinCode)}" placeholder="קוד חדר" dir="ltr">
         <button data-act="join">הצטרף</button>
       </div>
-      <div class="or">או</div>
+      ${debugOn ? `<div class="or">או</div>
       <div class="row test-row">
         <button data-act="test">🧪 חדר בדיקה</button>
         <select id="testN" aria-label="מספר שחקנים">${[2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
       </div>
-      <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>
+      <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
       <details class="rules"><summary>איך משחקים?</summary>${rulesHtml()}</details>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
@@ -453,7 +456,7 @@ function resultsHtml(v) {
   </div></div>`;
 }
 
-// ---------- Touch diagnostics (?debug=1) ----------
+// ---------- Diagnostics (?debug=1) ----------
 // Shows what the browser reports during touches, to diagnose devices we can't test on.
 const debugOn = new URLSearchParams(location.search).has('debug');
 const dbgLines = [];
@@ -470,6 +473,7 @@ function dbg(text) {
   el.textContent = `v${VERSION} ${navigator.userAgent.slice(0, 90)}\nscrollY=${Math.round(scrollY)} lock=${lockedY !== null}\n` + dbgLines.join('\n');
 }
 if (debugOn) addEventListener('scroll', () => dbg('scroll'), { passive: true });
+setNetLog(text => dbg('net ' + text));
 
 // ---------- Drag & drop ----------
 // Every drag maps to the same actions as clicking. Dropping outside a target returns the card.
@@ -752,13 +756,13 @@ function onAct(el) {
       return;
     }
     case 'start': return send({ t: 'start' });
-    case 'cancelJoin': location.href = location.pathname + (localParam().local ? '?local=1' : ''); return;
+    case 'cancelJoin': location.href = homeUrl(); return;
     case 'test': {
       ui.name = document.getElementById('name').value.trim();
       if (ui.name) store.set('hathatul-name', ui.name);
       return startTestRoom(Number(document.getElementById('testN').value));
     }
-    case 'exitTest': location.href = location.pathname + (localParam().local ? '?local=1' : ''); return;
+    case 'exitTest': location.href = homeUrl(); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
     case 'closeResults': document.querySelector('.overlay')?.remove(); return;
     case 'replace': extra = { slot: s }; return action('replace');

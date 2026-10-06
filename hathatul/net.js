@@ -1,81 +1,127 @@
 // Transports.
-// Online: messages go through a public MQTT relay over wss:// on port 443, which works from
-// any network (cellular carriers often block direct phone-to-phone WebRTC). The host also
-// listens on PeerJS (direct WebRTC) as a fallback for when the relay can't be reached.
+// Online: messages go through public MQTT relays over wss://, which work from any network
+// (cellular carriers often block direct phone-to-phone WebRTC). PeerJS (direct WebRTC) is
+// tried alongside them.
 // ?local=1: BroadcastChannel between tabs of the same browser (testing).
 //
 // Host:   hostTransport(code, { onData(cid, msg), onClose(cid), onReady(), onReconnect(), onError(err) })
 //         -> { send(cid, msg), close() }
 // Client: clientTransport(code, id, { onOpen(), onData(msg), onClose(), onError(err) }) -> { send(msg), close() }
-//         onOpen fires again after every reconnect.
+//         onOpen fires again after every reconnect; onError only when every path failed.
 
 const PREFIX = 'hathatul-room-';
-const RELAY = 'wss://public.cloud.shiftr.io';
-const RELAY_TIMEOUT = 7000;
+// Several independent public relays; the host listens on all of them and each player uses
+// whichever answers first, so one slow or blocked server doesn't stop the game.
+const RELAYS = [
+  { id: 'a', url: 'wss://public.cloud.shiftr.io', username: 'public', password: 'public' },
+  { id: 'b', url: 'wss://broker.hivemq.com:8884/mqtt' },
+  { id: 'c', url: 'wss://broker.emqx.io:8084/mqtt' },
+];
 const topic = code => `hathatul-v1/${code}`;
 const useLocal = new URLSearchParams(location.search).has('local');
 const rand = () => Math.random().toString(36).slice(2, 8);
 
+let log = () => {};
+export const setNetLog = fn => { log = fn; };
+
 export function hostTransport(code, h) {
   if (useLocal) return localHost(code, h);
-  // Both transports feed the same handlers; replies go back the way the player came in.
-  const route = new Map(); // cid -> transport
+  const route = new Map(); // cid -> the transport that player came in on
+  const children = [];
   let ready = false, failures = 0;
   const wrap = name => ({
-    onData(cid, msg) { route.set(cid, transports[name]); h.onData(cid, msg); },
+    onData(cid, msg) { route.set(cid, children.find(c => c.name === name)); h.onData(cid, msg); },
     onClose(cid) { route.delete(cid); h.onClose(cid); },
-    onReady() { if (!ready) { ready = true; h.onReady(); } },
-    onReconnect() { h.onReconnect?.(); },
+    onReady() {
+      log(`host ${name} ready`);
+      if (!ready) { ready = true; h.onReady(); }
+    },
+    onReconnect() { log(`host ${name} reconnected`); h.onReconnect?.(); },
     onError(err) {
-      console.warn(name, err);
-      if (!ready && ++failures === 2) h.onError(err);
+      log(`host ${name} error ${err?.type || err?.message || err}`);
+      if (!ready && ++failures === total) h.onError(err);
     },
   });
-  const transports = {};
-  transports.relay = typeof mqtt !== 'undefined' ? relayHost(code, wrap('relay')) : (failures++, null);
-  transports.peer = typeof Peer !== 'undefined' ? peerHost(code, wrap('peer')) : (failures++, null);
-  if (failures === 2) setTimeout(() => h.onError({ type: 'network' }), 0);
+  const total = (typeof mqtt !== 'undefined' ? RELAYS.length : 0) + (typeof Peer !== 'undefined' ? 1 : 0);
+  if (typeof mqtt !== 'undefined') for (const r of RELAYS) children.push({ name: r.id, ...relayHost(code, r, wrap(r.id)) });
+  if (typeof Peer !== 'undefined') children.push({ name: 'peer', ...peerHost(code, wrap('peer')) });
+  if (!total) setTimeout(() => h.onError({ type: 'network' }), 0);
   return {
     send(cid, msg) { route.get(cid)?.send(cid, msg); },
-    close() { transports.relay?.close(); transports.peer?.close(); },
+    close() { children.forEach(c => c.close()); },
   };
 }
 
 export function clientTransport(code, id, h) {
   if (useLocal) return localClient(code, h);
-  // Try the relay first; fall back to direct WebRTC if the relay can't be reached.
-  let active = null;
-  const usePeer = () => {
-    if (active?.kind === 'peer') return;
-    active?.close();
-    active = typeof Peer !== 'undefined' ? peerClient(code, h) : null;
-    if (!active) h.onError({ type: 'network' });
+  // Every path is tried at once; the first one the host answers on is kept, the rest closed.
+  const children = [];
+  let locked = null, failures = 0;
+  const wrap = name => {
+    const child = { name, open: false, failed: false };
+    child.handlers = {
+      onOpen() {
+        log(`${name} open`);
+        child.open = true;
+        if (!locked || locked === child) h.onOpen();
+      },
+      onData(msg) {
+        if (!locked) {
+          locked = child;
+          log(`using ${name}`);
+          children.filter(c => c !== child).forEach(c => c.close());
+        }
+        if (locked === child) h.onData(msg);
+      },
+      onClose() {
+        log(`${name} closed`);
+        child.open = false;
+        if (locked === child) h.onClose();
+      },
+      onError(err) {
+        log(`${name} error ${err?.type || err?.message || err}`);
+        if (child.failed || locked) return;
+        child.failed = true;
+        if (++failures === children.length) h.onError(err);
+      },
+    };
+    return child;
   };
-  if (typeof mqtt === 'undefined') usePeer();
-  else {
-    active = relayClient(code, id, { ...h, onError: usePeer });
-    const timer = setTimeout(() => { if (!active.connected()) usePeer(); }, RELAY_TIMEOUT);
-    active.onFirstConnect = () => clearTimeout(timer);
+  if (typeof mqtt !== 'undefined') {
+    for (const r of RELAYS) {
+      const child = wrap(r.id);
+      Object.assign(child, relayClient(code, r, id, child.handlers));
+      children.push(child);
+    }
   }
+  if (typeof Peer !== 'undefined') {
+    const child = wrap('peer');
+    Object.assign(child, peerClient(code, child.handlers));
+    children.push(child);
+  }
+  if (!children.length) setTimeout(() => h.onError({ type: 'network' }), 0);
   return {
-    send: msg => active?.send(msg),
-    close: () => active?.close(),
+    send(msg) {
+      if (locked) locked.send(msg);
+      else children.forEach(c => c.open && c.send(msg));
+    },
+    close() { children.forEach(c => c.close()); },
   };
 }
 
-// ---------- MQTT relay ----------
-const relayOpts = clientId => ({
-  username: 'public', password: 'public', clientId,
-  keepalive: 20, reconnectPeriod: 2000, connectTimeout: RELAY_TIMEOUT,
+// ---------- MQTT relays ----------
+const relayOpts = (r, clientId) => ({
+  username: r.username, password: r.password, clientId,
+  keepalive: 20, reconnectPeriod: 2000, connectTimeout: 10000,
 });
 
 function parse(buf) {
   try { return JSON.parse(buf.toString()); } catch { return null; }
 }
 
-function relayHost(code, h) {
+function relayHost(code, r, h) {
   const base = topic(code);
-  const c = mqtt.connect(RELAY, relayOpts(`hh-${code}-${rand()}`));
+  const c = mqtt.connect(r.url, relayOpts(r, `hh-${code}-${rand()}`));
   let connectedOnce = false;
   c.on('connect', () => {
     c.subscribe(`${base}/h`);
@@ -94,34 +140,31 @@ function relayHost(code, h) {
   };
 }
 
-function relayClient(code, id, h) {
+function relayClient(code, r, id, h) {
   const base = topic(code);
-  const cid = 'r' + id;
-  const c = mqtt.connect(RELAY, {
-    ...relayOpts(`hc-${cid}-${rand()}`),
+  const cid = `${r.id}${id}`;
+  const c = mqtt.connect(r.url, {
+    ...relayOpts(r, `hc-${cid}-${rand()}`),
     will: { topic: `${base}/h`, payload: JSON.stringify({ from: cid, kind: 'bye' }), qos: 0, retain: false },
   });
-  const t = {
-    kind: 'relay',
-    connected: () => c.connected,
-    onFirstConnect: null,
-    send: msg => c.publish(`${base}/h`, JSON.stringify({ from: cid, kind: 'data', msg })),
-    close: () => c.end(true),
-  };
   let first = true;
   c.on('connect', () => {
     c.subscribe(`${base}/c/${cid}`, () => {
-      if (first) { first = false; t.onFirstConnect?.(); }
+      first = false;
       h.onOpen();
     });
   });
+  c.on('close', () => { if (!first) h.onClose(); });
   c.on('message', (_t, buf) => {
     const m = parse(buf);
     if (m) h.onData(m);
   });
   c.on('error', err => { if (first) h.onError(err); });
-  addEventListener('pagehide', () => t.send && c.publish(`${base}/h`, JSON.stringify({ from: cid, kind: 'bye' })));
-  return t;
+  addEventListener('pagehide', () => c.connected && c.publish(`${base}/h`, JSON.stringify({ from: cid, kind: 'bye' })));
+  return {
+    send: msg => c.publish(`${base}/h`, JSON.stringify({ from: cid, kind: 'data', msg })),
+    close: () => c.end(true),
+  };
 }
 
 // ---------- PeerJS (direct WebRTC) ----------
