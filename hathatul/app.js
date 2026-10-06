@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=8';
-import { hostTransport, clientTransport } from './net.js?v=8';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=8';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=9';
+import { hostTransport, clientTransport } from './net.js?v=9';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=9';
 
-export const VERSION = 8; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 9; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -427,6 +427,24 @@ function resultsHtml(v) {
   </div></div>`;
 }
 
+// ---------- Touch diagnostics (?debug=1) ----------
+// Shows what the browser reports during touches, to diagnose devices we can't test on.
+const debugOn = new URLSearchParams(location.search).has('debug');
+const dbgLines = [];
+function dbg(text) {
+  if (!debugOn) return;
+  dbgLines.push(`${(performance.now() / 1000).toFixed(2)} ${text}`);
+  if (dbgLines.length > 12) dbgLines.shift();
+  let el = document.getElementById('dbg');
+  if (!el) {
+    el = document.createElement('pre');
+    el.id = 'dbg';
+    document.body.append(el);
+  }
+  el.textContent = `v${VERSION} ${navigator.userAgent.slice(0, 90)}\nscrollY=${Math.round(scrollY)} lock=${lockedY !== null}\n` + dbgLines.join('\n');
+}
+if (debugOn) addEventListener('scroll', () => dbg('scroll'), { passive: true });
+
 // ---------- Drag & drop ----------
 // Every drag maps to the same actions as clicking. Dropping outside a target returns the card.
 let drag = null; // in-progress drag
@@ -466,6 +484,7 @@ function dragTargets(key) {
 
 function startDrag() {
   drag.started = true;
+  dbg('drag started');
   drag.targets = drag.targets
     .map(t => ({ ...t, el: $app.querySelector(`[data-k="${t.key}"]`) }))
     .filter(t => t.el);
@@ -528,18 +547,39 @@ function returnHome({ clone, el, key, tilt = 0 }) {
 function cancelDrag() {
   const d = drag;
   drag = null;
+  releaseLock();
   clearDragUi();
   returnHome(d);
   if (ui.renderQueued) { ui.renderQueued = false; render(); }
 }
 
+// While a finger holds a card the page is locked (overflow hidden, touch-action none), so
+// the browser has nothing to scroll. iOS Safari ignores preventDefault on touchmove since
+// iOS 15; locking the page is what reliably works there.
+let lockedY = null;
+function lockScroll() {
+  if (lockedY !== null) return;
+  lockedY = scrollY;
+  document.documentElement.classList.add('drag-lock');
+}
+function unlockScroll() {
+  if (lockedY === null) return;
+  document.documentElement.classList.remove('drag-lock');
+  if (scrollY !== lockedY) scrollTo(0, lockedY);
+  lockedY = null;
+}
+
 $app.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.card[data-k]');
+  dbg(`down ${e.pointerType} ${el ? el.dataset.k : '-'} ${el?.classList.contains('draggable') ? 'draggable' : 'not-draggable'}${drag ? ' BUSY-drag' : ''}${dropped ? ' BUSY-drop' : ''}`);
   if (e.button !== 0 || drag || dropped) return;
-  const el = e.target.closest('.card[data-k].draggable');
-  const targets = el && dragTargets(el.dataset.k);
+  const targets = el?.classList.contains('draggable') && dragTargets(el.dataset.k);
   if (!targets) return;
   drag = { el, key: el.dataset.k, targets, x0: e.clientX, y0: e.clientY, lastX: e.clientX, tilt: 0, rect: el.getBoundingClientRect(), started: false, pid: e.pointerId };
+  if (e.pointerType !== 'mouse') lockScroll();
 });
+// Runs after the drag handlers below (registered later on the same target).
+const releaseLock = () => setTimeout(() => { if (!drag) unlockScroll(); }, 0);
 
 addEventListener('pointermove', e => {
   if (!drag || e.pointerId !== drag.pid) return;
@@ -596,6 +636,7 @@ addEventListener('pointerup', e => {
 // (every iPhone browser, and in-app browsers) decides to scroll on touchstart.
 $app.addEventListener('touchstart', e => {
   if (e.target.closest('.card.draggable')) e.preventDefault();
+  dbg(`touchstart prevented=${e.defaultPrevented}`);
 }, { passive: false });
 
 // iOS Safari ignores touch-action on its own and scrolls the page instead of dragging;
@@ -604,7 +645,10 @@ addEventListener('touchmove', e => {
   if (drag) e.preventDefault();
 }, { passive: false });
 
+addEventListener('pointerup', releaseLock);
 addEventListener('pointercancel', e => {
+  dbg('POINTERCANCEL (browser took over the gesture)');
+  releaseLock();
   if (drag && e.pointerId === drag.pid) {
     if (drag.started) cancelDrag();
     else drag = null;
