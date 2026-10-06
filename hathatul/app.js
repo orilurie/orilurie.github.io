@@ -1,8 +1,22 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=13';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=13';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=13';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=14';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=14';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=14';
 
-export const VERSION = 13; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 14; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+
+// Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
+// fresh; if it's newer, reload once with a changed URL so the new page is fetched.
+fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' })
+  .then(r => r.json())
+  .then(({ version }) => {
+    if (version <= VERSION) return;
+    const key = `hathatul-reloaded-${version}`;
+    try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); } catch {}
+    const q = new URLSearchParams(location.search);
+    q.set('v', version);
+    location.replace(`${location.pathname}?${q}`);
+  })
+  .catch(() => {});
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
