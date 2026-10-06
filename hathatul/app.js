@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=9';
-import { hostTransport, clientTransport } from './net.js?v=9';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=9';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=10';
+import { hostTransport, clientTransport } from './net.js?v=10';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=10';
 
-export const VERSION = 9; // bump on every deploy, together with the ?v= in index.html and the imports below
+export const VERSION = 10; // bump on every deploy, together with the ?v= in index.html and the imports below
 const $app = document.getElementById('app');
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -133,17 +133,19 @@ function startTestRoom(n) {
     const seat = game.players[game.turn].id;
     receive({ t: 'room', room, view: viewFor(game, seat, { revealAll: true }) });
   };
+  // Every card is visible here, so the start-of-round peek step is skipped.
+  const readyAll = () => {
+    for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, { type: 'ready' });
+  };
   send = msg => {
     if (msg.t !== 'action') return;
     const { action } = msg;
-    if (action.type === 'ready') {
-      for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, action);
-      return push();
-    }
     const res = applyAction(game, game.players[game.turn].id, action);
     if (res.error) return receive({ t: 'error', text: res.error });
+    if (game.phase === 'peek') readyAll();
     push();
   };
+  readyAll();
   ui.lastEventId = 0;
   push();
 }
@@ -387,7 +389,7 @@ function renderGame() {
   }
 
   const controls = [];
-  if (v.phase === 'peek' && !meP.ready) controls.push(`<button class="primary" data-act="ready">זכרתי! הסתר את הקלפים</button>`);
+  if (v.phase === 'peek' && !meP.ready) controls.push(`<button class="primary pulse" data-act="ready">זכרתי! הסתר את הקלפים</button>`);
   if (myTurn && !pend && v.canCall) controls.push(`<button class="call" data-act="call">📣 חתחתול!</button>`);
   if (myTurn && (pend?.type === 'peek' || pend?.type === 'swap')) controls.push(`<button data-act="skipPower">דלג</button>`);
 
@@ -569,8 +571,32 @@ function unlockScroll() {
   lockedY = null;
 }
 
+// Why a card can't be dragged right now (shown when someone tries).
+function whyNotDraggable(key) {
+  const v = ui.view;
+  if (!v) return null;
+  const meP = v.players[v.me];
+  if (v.phase === 'peek') return meP.ready ? 'מחכים שכל השחקנים יסיימו להציץ…' : 'קודם לחצו על "זכרתי!" כדי להתחיל לשחק';
+  if (v.phase !== 'play') return null;
+  if (v.turn !== v.me) return `זה התור של ${v.players[v.turn].name}`;
+  const pend = v.pending;
+  const mine = key.startsWith(`h${v.me}-`);
+  if (!pend) {
+    if (key === 'discard') return 'אי אפשר לקחת קלף כוח מערימת הזריקה';
+    if (mine) return 'קודם שלפו קלף מהקופה או מערימת הזריקה';
+    return 'אי אפשר להזיז את הקלף הזה';
+  }
+  if (pend.type === 'drawn') return mine ? 'גררו את הקלף שנשלף אל הקלף שרוצים להחליף' : 'כבר שלפתם קלף. גררו אותו ליד או לערימת הזריקה';
+  if (pend.type === 'draw2') return 'גררו קלף מהקופה';
+  if (pend.type === 'peek') return 'לחצו על קלף שלכם כדי להציץ בו';
+  if (pend.type === 'swap') return 'גררו קלף שלכם אל קלף של יריב';
+  return null;
+}
+let nudge = null;
+
 $app.addEventListener('pointerdown', e => {
   const el = e.target.closest('.card[data-k]');
+  nudge = el && !el.classList.contains('draggable') && $app.classList.contains('game') ? { el, x0: e.clientX, y0: e.clientY } : null;
   dbg(`down ${e.pointerType} ${el ? el.dataset.k : '-'} ${el?.classList.contains('draggable') ? 'draggable' : 'not-draggable'}${drag ? ' BUSY-drag' : ''}${dropped ? ' BUSY-drop' : ''}`);
   if (e.button !== 0 || drag || dropped) return;
   const targets = el?.classList.contains('draggable') && dragTargets(el.dataset.k);
@@ -582,6 +608,15 @@ $app.addEventListener('pointerdown', e => {
 const releaseLock = () => setTimeout(() => { if (!drag) unlockScroll(); }, 0);
 
 addEventListener('pointermove', e => {
+  if (nudge && Math.hypot(e.clientX - nudge.x0, e.clientY - nudge.y0) > 10) {
+    const why = whyNotDraggable(nudge.el.dataset.k);
+    if (why) {
+      toast(why);
+      nudge.el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px) rotate(-3deg)' }, { transform: 'translateX(6px) rotate(3deg)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }], { duration: 360 });
+      document.querySelector('[data-act="ready"]')?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 500 });
+    }
+    nudge = null;
+  }
   if (!drag || e.pointerId !== drag.pid) return;
   const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
   if (!drag.started) {
@@ -645,7 +680,7 @@ addEventListener('touchmove', e => {
   if (drag) e.preventDefault();
 }, { passive: false });
 
-addEventListener('pointerup', releaseLock);
+addEventListener('pointerup', () => { nudge = null; releaseLock(); });
 addEventListener('pointercancel', e => {
   dbg('POINTERCANCEL (browser took over the gesture)');
   releaseLock();
