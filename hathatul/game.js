@@ -31,7 +31,6 @@ export function createGame(players, rnd = Math.random) {
   const state = {
     rnd,
     round: 0,
-    starter: -1,
     players: players.map(p => ({ id: p.id, name: p.name, hand: [], total: 0 })),
     log: [],
     events: [],
@@ -43,7 +42,8 @@ export function createGame(players, rnd = Math.random) {
 
 function dealRound(state) {
   state.round++;
-  state.starter = (state.starter + 1) % state.players.length;
+  // Turn order is reshuffled every round.
+  state.order = shuffle(state.players.map((_, i) => i), state.rnd);
   state.deck = shuffle(buildDeck(), state.rnd);
   state.discard = [];
   for (const p of state.players) p.hand = state.deck.splice(0, HAND_SIZE);
@@ -52,7 +52,7 @@ function dealRound(state) {
   state.discard.push(state.deck.splice(i, 1)[0]);
   state.phase = 'peek';
   state.ready = new Set();
-  state.turn = state.starter;
+  state.turn = state.order[0];
   state.turnsTaken = 0;
   state.pending = null;
   state.calledBy = null;
@@ -89,7 +89,7 @@ const cardName = c => (c.kind === 'num' ? String(c.value) : POWERS[c.power].labe
 function endTurn(state) {
   state.pending = null;
   state.turnsTaken++;
-  state.turn = (state.turn + 1) % state.players.length;
+  state.turn = state.order[(state.order.indexOf(state.turn) + 1) % state.order.length];
   if (state.calledBy !== null && state.turn === state.calledBy) endRound(state);
 }
 
@@ -125,7 +125,7 @@ export function applyAction(state, playerId, action) {
     emit(state, { type: 'ready', pi });
     if (state.ready.size === state.players.length) {
       state.phase = 'play';
-      addLog(state, `כולם מוכנים. ${state.players[state.turn].name} מתחיל/ה.`);
+      addLog(state, `כולם מוכנים. סדר התורות בסיבוב: ${state.order.map(i => state.players[i].name).join(' ← ')}.`);
     }
     return { privates };
   }
@@ -268,6 +268,7 @@ export function viewFor(state, playerId, { revealAll = false } = {}) {
     phase: state.phase,
     me: pi,
     turn: state.turn,
+    order: state.order,
     players,
     deckCount: state.deck.length,
     discardTop: state.discard[state.discard.length - 1] || null,

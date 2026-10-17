@@ -286,14 +286,15 @@ body.dragging #app .card.glow:not(.drop-ok) { outline: none; animation: none; }
     max-width: none; height: 100vh; height: 100dvh; padding: 6px 14px;
     display: grid; gap: 6px 14px;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto auto 1fr auto auto;
+    grid-template-rows: auto auto auto 1fr auto auto auto;
     grid-template-areas:
       "top top"
       "lastcall lastcall"
       "opps opps"
       "me table"
       "status table"
-      "controls table";
+      "controls table"
+      "emoji table";
   }
   #app.game > .top { grid-area: top; margin: 0; font-size: .8rem; }
   #app.game > .top .ghost { padding: 2px 8px; }
@@ -362,3 +363,34 @@ button.pulse { animation: pulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 0 r
 .confirm-call p { color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
 .confirm-call button { width: 100%; margin-top: 8px; }
 .confirm-call button.call { animation: none; }
+
+/* ---- turn order ---- */
+.seat {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; border-radius: 999px; padding: 0 5px; margin-inline-end: 5px;
+  background: var(--line); color: var(--ink); font-size: 11px; font-weight: 800; vertical-align: 1px;
+}
+.opp.active .seat, .me.active .seat { background: var(--accent); color: var(--accent-ink); }
+.order-line { font-size: .85rem; font-weight: 400; margin-top: 4px; opacity: .85; }
+.icon-btn { font-size: 1.05rem; padding: 4px 6px !important; }
+
+/* ---- emoji reactions ---- */
+.emoji-bar { display: flex; justify-content: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.emoji-btn { font-size: 1.35rem; padding: 4px 8px; border-radius: 999px; line-height: 1.2; background: var(--panel); }
+.emoji-fly { position: fixed; display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 36; }
+.emoji-fly b { font-size: 46px; line-height: 1; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .3)); }
+.emoji-fly small {
+  margin-top: 2px; background: var(--ink); color: var(--bg); font-size: 11px; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  #app.game > .emoji-bar { grid-area: emoji; margin: 0; gap: 4px; }
+  .emoji-btn { font-size: 1.05rem; padding: 2px 6px; }
+}
+
+/* ---- install as app ---- */
+.install-btn { width: 100%; margin-top: 16px; border-color: var(--accent); color: var(--accent); }
+.install-ios { margin-top: 16px; border: 2px dashed var(--line); border-radius: 12px; padding: 8px 12px; }
+.install-ios summary { cursor: pointer; font-weight: 600; }
+.install-ios li { margin: 6px 0; line-height: 1.5; }
+@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }

@@ -1,8 +1,10 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=15';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=15';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=15';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=16';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=16';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=16';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=16';
 
-export const VERSION = 15; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
+export const VERSION = 16; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -18,6 +20,18 @@ fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' })
   })
   .catch(() => {});
 const $app = document.getElementById('app');
+
+// ---------- Install as an app ----------
+if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOSDevice = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installPrompt = null; // Android/desktop Chrome: the browser's own install dialog
+addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  if (ui.screen === 'home') render();
+});
+addEventListener('appinstalled', () => { installPrompt = null; if (ui.screen === 'home') render(); });
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -93,6 +107,14 @@ function startHosting(code) {
       room.game = createGame(room.players.map(x => ({ id: x.pid, name: x.name })));
       return broadcast();
     }
+    if (msg.t === 'emoji' && room.game) {
+      // Reactions are relayed to everyone; not part of the game state. Rate-limited per player.
+      if (!EMOJIS.includes(msg.e) || Date.now() - (p.lastEmoji || 0) < 600) return;
+      p.lastEmoji = Date.now();
+      const from = room.players.indexOf(p);
+      for (const x of room.players) sendTo(x, { t: 'emoji', e: msg.e, from, name: p.name });
+      return;
+    }
     if (msg.t === 'action' && room.game) {
       if (msg.action.type === 'nextRound' && !isHost) return;
       const res = applyAction(room.game, p.pid, msg.action);
@@ -153,6 +175,7 @@ function startTestRoom(n) {
     for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, { type: 'ready' });
   };
   send = msg => {
+    if (msg.t === 'emoji') return receive({ t: 'emoji', e: msg.e, from: game.turn, name: game.players[game.turn].name });
     if (msg.t !== 'action') return;
     const { action } = msg;
     const res = applyAction(game, game.players[game.turn].id, action);
@@ -229,6 +252,13 @@ function receive(msg) {
     if (ui.view) animate(fresh, before, prev);
     if (dropped) { clearTimeout(dropped.timer); dropped.clone.remove(); dropped = null; }
     return;
+  } else if (msg.t === 'emoji') {
+    if (ui.screen !== 'game') return;
+    const mine = ui.view && msg.from === ui.view.me && !ui.room?.test;
+    emojiFx(document.querySelector(`[data-seat="${msg.from}"]`), msg.e, mine ? '' : msg.name);
+    play('pop');
+    if (!mine) haptic('emoji');
+    return;
   } else if (msg.t === 'reveal') {
     ui.reveal = { slot: msg.slot, card: msg.card };
     setTimeout(() => { ui.reveal = null; render(); }, 4000);
@@ -249,11 +279,32 @@ function animate(fresh, before, prev) {
       ui.resultsReady = true;
       render();
       const meId = v.players[v.me].id;
-      if (v.results?.some(r => r.winner && r.id === meId)) confetti();
+      const won = v.results?.some(r => r.winner && r.id === meId);
+      if (won) { confetti(); haptic('win'); }
+      play(won ? 'win' : 'lose');
     }
-    if (myTurn(ui.view) && !myTurn(prev)) turnFx();
+    if (myTurn(ui.view) && !myTurn(prev)) {
+      turnFx();
+      if (!ui.room?.test) { play('turn'); haptic('turn'); }
+      if (document.hidden) flashTitle();
+    }
   });
 }
+
+// While the page is in the background, flash the tab title when it becomes my turn.
+const baseTitle = document.title;
+let titleTimer = null;
+function flashTitle() {
+  clearInterval(titleTimer);
+  let on = false;
+  titleTimer = setInterval(() => {
+    on = !on;
+    document.title = on ? '🔔 התור שלך!' : baseTitle;
+  }, 900);
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { clearInterval(titleTimer); document.title = baseTitle; }
+});
 
 function fail(text) {
   if (ui.screen === 'game' || ui.screen === 'lobby') {
@@ -328,9 +379,24 @@ function renderHome() {
         <select id="testN" aria-label="מספר שחקנים">${[2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
+      ${installHtml()}
       <details class="rules"><summary>איך משחקים?</summary>${rulesHtml()}</details>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
+}
+
+function installHtml() {
+  if (standalone) return '';
+  if (installPrompt) return `<button class="install-btn" data-act="install">📲 התקינו את חתחתול כאפליקציה</button>`;
+  if (isIOSDevice) {
+    return `<details class="install-ios"><summary>📲 התקנה כאפליקציה במסך הבית</summary>
+      <ol>
+        <li>פתחו את הדף ב-<b>Safari</b> (מתוך אפליקציות אחרות, כמו וואטסאפ או Claude, ההתקנה לא זמינה)</li>
+        <li>לחצו על כפתור השיתוף <b>⬆️</b></li>
+        <li>בחרו <b>"הוסף למסך הבית"</b> ואז <b>"הוסף"</b></li>
+      </ol></details>`;
+  }
+  return '';
 }
 
 function rulesHtml() {
@@ -367,7 +433,10 @@ function renderLobby() {
 function statusText(v) {
   const meP = v.players[v.me];
   const cur = v.players[v.turn];
-  if (v.phase === 'peek') return meP.ready ? 'מחכים שכולם יסיימו להציץ…' : 'זכרו את שני הקלפים החיצוניים שלכם!';
+  if (v.phase === 'peek') {
+    const order = `<div class="order-line">🔀 סדר התורות בסיבוב: ${v.order.map(i => esc(v.players[i].name)).join(' ← ')}</div>`;
+    return (meP.ready ? 'מחכים שכולם יסיימו להציץ…' : 'זכרו את שני הקלפים החיצוניים שלכם!') + order;
+  }
   if (v.phase === 'roundEnd') return 'הסיבוב נגמר!';
   const pend = v.pending;
   if (v.turn !== v.me) {
@@ -390,14 +459,19 @@ function renderGame() {
   const pend = v.pending;
   const hl = (pi, slot) => v.highlight?.players.some(h => h.pi === pi && h.slot === slot) ? 'hl' : '';
 
-  const opps = v.players
-    .map((p, i) => ({ p, i }))
-    .filter(x => x.i !== v.me)
+  // Opponents in this round's turn order, starting with whoever plays after me.
+  const myPos = v.order.indexOf(v.me);
+  const seatNo = i => v.order.indexOf(i) + 1;
+  const badge = i => `<span class="seat" title="מקום בסדר התורות">${seatNo(i)}</span>`;
+  const opps = v.order
+    .map((_, k) => v.order[(myPos + 1 + k) % v.order.length])
+    .filter(i => i !== v.me)
+    .map(i => ({ p: v.players[i], i }))
     .map(({ p, i }) => {
       const swapTarget = myTurn && pend?.type === 'swap' && ui.swapSlot !== null;
       const conn = ui.room.players[i]?.connected === false ? ' <small class="off">(מנותק/ת)</small>' : '';
-      return `<div class="opp ${v.turn === i && v.phase === 'play' ? 'active' : ''}">
-        <div class="oname">${v.calledBy === i ? '📣 ' : ''}${esc(p.name)}${conn} <span class="pts">${p.total} נק׳</span></div>
+      return `<div class="opp ${v.turn === i && v.phase === 'play' ? 'active' : ''}" data-seat="${i}">
+        <div class="oname">${badge(i)}${v.calledBy === i ? '📣 ' : ''}${esc(p.name)}${conn} <span class="pts">${p.total} נק׳</span></div>
         <div class="ohand">${p.hand.map((c, s) => cardHtml(c, {
           size: 'sm', cls: hl(i, s), k: `h${i}-${s}`,
           act: swapTarget ? 'swapTarget' : '', data: `data-p="${i}" data-s="${s}"`,
@@ -440,6 +514,8 @@ function renderGame() {
     <header class="top">
       <div><b>חתחתול</b> · ${ui.room.test ? '🧪 חדר בדיקה' : `חדר <span dir="ltr">${ui.room.code}</span>`} · סיבוב ${v.round}</div>
       ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
+      <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
+      <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
       <button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>
     </header>
     ${v.calledBy !== null && v.phase === 'play' ? `<div class="lastcall">📣 ${esc(v.players[v.calledBy].name)} קרא/ה חתחתול! ${v.calledBy === v.me ? 'מחכים שכולם ישחקו תור אחרון…' : 'זה הסבב האחרון!'}</div>` : ''}
@@ -451,10 +527,11 @@ function renderGame() {
     </section>
     <div class="status ${myTurn ? 'mine' : ''}">${statusText(v)}</div>
     <div class="controls">${controls.join('')}</div>
-    <section class="me ${myTurn ? 'active' : ''}">
-      <div class="oname">${v.calledBy === v.me ? '📣 ' : ''}${esc(meP.name)} ${ui.room.test ? "(בתור)" : "(את/ה)"} <span class="pts">${meP.total} נק׳</span></div>
+    <section class="me ${myTurn ? 'active' : ''}" data-seat="${v.me}">
+      <div class="oname">${badge(v.me)}${v.calledBy === v.me ? '📣 ' : ''}${esc(meP.name)} ${ui.room.test ? "(בתור)" : "(את/ה)"} <span class="pts">${meP.total} נק׳</span></div>
       <div class="hand">${myHand}</div>
     </section>
+    <div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>
     ${ui.showLog ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
     ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}
     ${ui.confirmCall ? `<div class="overlay"><div class="panel confirm-call" role="dialog" aria-modal="true">
@@ -548,7 +625,7 @@ function startDrag() {
   c.style.setProperty('--w', r.width + 'px');
   document.getElementById('fx').append(clone);
   drag.clone = clone;
-  navigator.vibrate?.(15);
+  haptic('tap');
 }
 
 function hitTarget(x, y) {
@@ -652,6 +729,8 @@ addEventListener('pointermove', e => {
     const why = whyNotDraggable(nudge.el.dataset.k);
     if (why) {
       toast(why);
+      play('nope');
+      haptic('nope');
       nudge.el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px) rotate(-3deg)' }, { transform: 'translateX(6px) rotate(3deg)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }], { duration: 360 });
       document.querySelector('[data-act="ready"]')?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 500 });
     }
@@ -776,6 +855,18 @@ function onAct(el) {
     }
     case 'exitTest': location.href = homeUrl(); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
+    case 'install':
+      installPrompt?.prompt();
+      installPrompt?.userChoice.finally(() => { installPrompt = null; render(); });
+      return;
+    case 'emoji': {
+      const now = Date.now();
+      if (now - (ui.lastEmoji || 0) < 600) return;
+      ui.lastEmoji = now;
+      return send({ t: 'emoji', e: el.dataset.e });
+    }
+    case 'toggleSound': toggleSfx('sound'); return render();
+    case 'toggleHaptics': toggleSfx('haptics'); return render();
     case 'closeResults': document.querySelector('.overlay')?.remove(); return;
     case 'replace': extra = { slot: s }; return action('replace');
     case 'peek': extra = { slot: s }; return action('peek');
