@@ -1,8 +1,8 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=14';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=14';
-import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=14';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=15';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=15';
+import { snapshot, playEvents, turnFx, confetti, STRIP } from './anim.js?v=15';
 
-export const VERSION = 14; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 15; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -431,7 +431,9 @@ function renderGame() {
 
   const controls = [];
   if (v.phase === 'peek' && !meP.ready) controls.push(`<button class="primary pulse" data-act="ready">זכרתי! הסתר את הקלפים</button>`);
-  if (myTurn && !pend && v.canCall) controls.push(`<button class="call" data-act="call">📣 חתחתול!</button>`);
+  if (myTurn && !pend && v.canCall) controls.push(`<button class="call" data-act="askCall">📣 חתחתול!</button>`);
+  // Calling ends the round for everyone, so it is confirmed first (easy to tap by mistake).
+  if (!(myTurn && !pend && v.canCall)) ui.confirmCall = false;
   if (myTurn && (pend?.type === 'peek' || pend?.type === 'swap')) controls.push(`<button data-act="skipPower">דלג</button>`);
 
   $app.innerHTML = `
@@ -454,7 +456,14 @@ function renderGame() {
       <div class="hand">${myHand}</div>
     </section>
     ${ui.showLog ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
-    ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}`;
+    ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}
+    ${ui.confirmCall ? `<div class="overlay"><div class="panel confirm-call" role="dialog" aria-modal="true">
+      <div class="cc-icon">📣</div>
+      <h2>לקרוא חתחתול?</h2>
+      <p>לכל שאר השחקנים יישאר תור אחד אחרון, ואז כל הקלפים נחשפים והסיבוב נגמר.</p>
+      <button class="call" data-act="call">כן, חתחתול!</button>
+      <button data-act="cancelCall">ביטול, להמשיך לשחק</button>
+    </div></div>` : ''}`;
 }
 
 function resultsHtml(v) {
@@ -775,7 +784,10 @@ function onAct(el) {
       extra = { slot: ui.swapSlot, target: Number(el.dataset.p), targetSlot: s };
       ui.swapSlot = null;
       return action('swap');
-    case 'ready': case 'call': case 'drawDeck': case 'takeDiscard':
+    case 'askCall': ui.confirmCall = true; return render();
+    case 'cancelCall': ui.confirmCall = false; return render();
+    case 'call': ui.confirmCall = false; return action('call');
+    case 'ready': case 'drawDeck': case 'takeDiscard':
     case 'discardDrawn': case 'usePower': case 'skipPower': case 'nextRound':
       return action(act);
   }
