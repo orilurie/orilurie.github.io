@@ -1,10 +1,10 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=16';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=16';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=16';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=16';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=17';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=17';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=17';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=17';
 
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 16; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 17; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -73,6 +73,14 @@ function startHosting(code) {
     if (p.cid === 'self') receive(msg);
     else transport.send(p.cid, msg);
   };
+  const roomSummary = () => ({
+    code,
+    started: !!room.game,
+    players: room.players.map((p, i) => ({ name: p.name, connected: p.connected, isHost: i === 0 })),
+  });
+  const sendState = p => sendTo(p, {
+    t: 'room', room: { ...roomSummary(), isHost: p.pid === pid }, view: room.game ? viewFor(room.game, p.pid) : null,
+  });
   const broadcast = () => {
     const summary = {
       code,
@@ -92,10 +100,16 @@ function startHosting(code) {
         p = { pid: msg.pid, name: String(msg.name || 'שחקן').slice(0, 16) };
         room.players.push(p);
       }
+      cidToPid.set(cid, p.pid);
+      // A player joins on several relays at once, then settles on one ("locked"). Late joins
+      // from the other paths must not steal the route right after it was chosen.
+      if (msg.locked && p.lockedCid !== cid) { p.lockedCid = cid; p.lockedAt = Date.now(); }
+      else if (p.lockedCid && cid !== p.lockedCid && Date.now() - p.lockedAt < 8000) return;
+      const changed = p.cid !== cid || !p.connected;
       p.cid = cid;
       p.connected = true;
-      cidToPid.set(cid, p.pid);
-      return broadcast();
+      if (changed) return broadcast();
+      return sendState(p); // heartbeat / resync: only this player needs the current state
     }
     const fromPid = cidToPid.get(cid);
     const p = room.players.find(x => x.pid === fromPid);
@@ -196,14 +210,24 @@ function joinRoom(code) {
     onOpen: join, // also after every reconnect, so the host re-sends the current state
     onData(msg) {
       if (msg.t === 'room') answered = true;
+      lastMsgAt = Date.now();
+      setNetIssue(false);
       receive(msg);
     },
-    onClose() { fail('החיבור למארח נותק'); },
+    onClose() { setNetIssue(true); }, // the transport reconnects by itself
     onError(err) {
       fail(err.type === 'peer-unavailable' ? 'לא נמצא חדר עם הקוד הזה' : 'שגיאת חיבור: ' + (err.type || err.message));
     },
   });
   send = msg => transport.send(msg);
+  // Heartbeat: re-join every 10s; the host answers with the current state, which repairs any
+  // update lost on the way. If nothing arrives for a while, show that we're reconnecting.
+  let lastMsgAt = Date.now();
+  setInterval(() => {
+    if (!answered) return;
+    join();
+    if (Date.now() - lastMsgAt > 16000) setNetIssue(true);
+  }, 10000);
   // Keep asking until the host answers: the host's phone may be briefly away (e.g. sharing
   // the link), and messages sent meanwhile are not kept by the relay.
   const t0 = Date.now();
@@ -221,6 +245,29 @@ function joinRoom(code) {
     }
   }, 2500);
 }
+
+function setNetIssue(on) {
+  if (ui.netIssue === on) return;
+  ui.netIssue = on;
+  document.getElementById('net-issue')?.remove();
+  if (on && (ui.screen === 'game' || ui.screen === 'lobby')) {
+    const el = document.createElement('div');
+    el.id = 'net-issue';
+    el.textContent = '🔄 מתחבר מחדש למארח…';
+    document.body.append(el);
+  }
+}
+
+// Keep the screen on during a game: a sleeping phone drops its connection (fatal for the host).
+let wakeLock = null;
+async function keepAwake() {
+  if (ui.screen !== 'game' || wakeLock || document.hidden || !navigator.wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch {}
+}
+document.addEventListener('visibilitychange', keepAwake);
 
 function receive(msg) {
   if (msg.t === 'room') {
@@ -349,6 +396,7 @@ function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) 
 function render() {
   if (drag?.started) { ui.renderQueued = true; return; }
   $app.classList.toggle('game', ui.screen === 'game');
+  keepAwake();
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting') {
     $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>${ui.connectMsg || 'מתחבר…'}</p>

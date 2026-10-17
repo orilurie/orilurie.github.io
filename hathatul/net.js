@@ -70,6 +70,7 @@ export function clientTransport(code, id, h) {
           locked = child;
           log(`using ${name}`);
           children.filter(c => c !== child).forEach(c => c.close());
+          h.onOpen(); // re-join on the chosen path (marked locked) so the host replies only there
         }
         if (locked === child) h.onData(msg);
       },
@@ -102,7 +103,8 @@ export function clientTransport(code, id, h) {
   if (!children.length) setTimeout(() => h.onError({ type: 'network' }), 0);
   return {
     send(msg) {
-      if (locked) locked.send(msg);
+      // Once a path is chosen, messages say so; the host then stops answering on other paths.
+      if (locked) locked.send({ ...msg, locked: true });
       else children.forEach(c => c.open && c.send(msg));
     },
     close() { children.forEach(c => c.close()); },

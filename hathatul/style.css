@@ -394,3 +394,10 @@ button.pulse { animation: pulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 0 r
 .install-ios summary { cursor: pointer; font-weight: 600; }
 .install-ios li { margin: 6px 0; line-height: 1.5; }
 @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }
+
+/* ---- reconnecting indicator ---- */
+#net-issue {
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 45;
+  background: var(--ink); color: var(--bg); font-weight: 700; font-size: .85rem;
+  padding: 6px 14px; border-radius: 999px; box-shadow: var(--shadow); animation: fadeIn .3s;
+}
