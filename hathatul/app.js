@@ -1,10 +1,10 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=18';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=18';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=18';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=18';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=19';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=19';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=19';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=19';
 
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 18; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 19; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
