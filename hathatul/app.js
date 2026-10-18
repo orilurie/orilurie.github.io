@@ -1,10 +1,10 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=17';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=17';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=17';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=17';
+import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=18';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=18';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=18';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=18';
 
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 17; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 18; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -564,7 +564,7 @@ function renderGame() {
       ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
       <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
       <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
-      <button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>
+      ${ui.room.test ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}
     </header>
     ${v.calledBy !== null && v.phase === 'play' ? `<div class="lastcall">📣 ${esc(v.players[v.calledBy].name)} קרא/ה חתחתול! ${v.calledBy === v.me ? 'מחכים שכולם ישחקו תור אחרון…' : 'זה הסבב האחרון!'}</div>` : ''}
     <section class="opps">${opps}</section>
@@ -580,7 +580,7 @@ function renderGame() {
       <div class="hand">${myHand}</div>
     </section>
     <div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>
-    ${ui.showLog ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
+    ${ui.showLog && ui.room.test ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
     ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}
     ${ui.confirmCall ? `<div class="overlay"><div class="panel confirm-call" role="dialog" aria-modal="true">
       <div class="cc-icon">📣</div>

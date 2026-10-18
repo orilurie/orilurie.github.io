@@ -1,7 +1,7 @@
 // Animations. Cards "fly" as ghost copies on a fixed layer between their old and new spots
 // (snapshot before render -> render -> animate from old rects to new elements).
 
-import { play, haptic } from './sfx.js?v=17';
+import { play, haptic } from './sfx.js?v=18';
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const wait = ms => new Promise(r => setTimeout(r, ms));
