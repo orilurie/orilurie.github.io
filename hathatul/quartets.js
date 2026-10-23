@@ -1,10 +1,10 @@
 // רביעיות (Quartets) – game rules with a regular deck. Pure state machine, runs on the host.
 // A quartet is all four suits of one rank. On your turn you ask another player for a rank you
-// hold; if they have it they give you every card of that rank and you ask again, otherwise the
-// turn passes to the next player. Complete quartets are laid down automatically. A player with
+// hold; if they have it they give you every card of that rank. Either way the turn then passes
+// to the next player (one question per turn). Complete quartets are laid down automatically. A player with
 // no cards left is out. When every quartet is down, whoever has the most wins.
 
-import { shuffle, fairOrder } from './util.js?v=20';
+import { shuffle, fairOrder } from './util.js?v=21';
 
 export const RANKS = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 export const SUITS = ['♠', '♥', '♦', '♣'];
@@ -116,7 +116,7 @@ export function applyAction(state, playerId, action) {
   emit(state, { type: 'ask', from: pi, to: ti, rank: action.rank, got: given.length });
   layQuartets(state, pi);
   for (const [i, p] of [[ti, target], [pi, me]]) if (isOut(p) && state.phase === 'play') emit(state, { type: 'out', pi: i });
-  if (!given.length) nextTurn(state);
+  nextTurn(state); // one question per turn, whatever the answer
   checkEnd(state);
   return { privates: [] };
 }

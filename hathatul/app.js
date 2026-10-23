@@ -1,9 +1,9 @@
-import * as Hathatul from './game.js?v=20';
-import * as Quartets from './quartets.js?v=20';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=20';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=20';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=20';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=20';
+import * as Hathatul from './game.js?v=21';
+import * as Quartets from './quartets.js?v=21';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=21';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=21';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=21';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=21';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -12,7 +12,7 @@ const GAMES = {
   quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 20; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 21; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.

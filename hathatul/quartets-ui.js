@@ -1,8 +1,8 @@
 // רביעיות – screen, interactions and animations. Rendering is driven by app.js.
 
-import { RANK_NAMES, rankMany, MAX_PLAYERS } from './quartets.js?v=20';
-import { fly, burst } from './anim.js?v=20';
-import { play, haptic } from './sfx.js?v=20';
+import { RANK_NAMES, rankMany, MAX_PLAYERS } from './quartets.js?v=21';
+import { fly, burst } from './anim.js?v=21';
+import { play, haptic } from './sfx.js?v=21';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const red = suit => suit === '♥' || suit === '♦';
@@ -13,7 +13,7 @@ export const quartetsRulesHtml = () => `<ul>
   <li>משחקים עם חפיסה רגילה. <b>רביעייה</b> = ארבעת הקלפים של אותו ערך, אחד מכל צורה (♠♥♦♣).</li>
   <li>כל הקלפים מחולקים לשחקנים. גודל החפיסה לפי מספר השחקנים (בערך 10 קלפים לכל אחד): תמיד אסים, מלכים, מלכות ונסיכים, ועוד מספרים מ-10 ומטה.</li>
   <li>בתורך: בוחרים ערך שיש לכם ביד ושואלים שחקן אחר, למשל "דנה, יש לך מלכים?".</li>
-  <li>אם יש לו, הוא חייב לתת לכם את <b>כל</b> הקלפים מהערך הזה, ואתם ממשיכים לשאול. אם אין לו, התור עובר לשחקן הבא.</li>
+  <li>אם יש לו, הוא חייב לתת לכם את <b>כל</b> הקלפים מהערך הזה. בכל מקרה, לכל אחד שאלה אחת בתור, ואז התור עובר לשחקן הבא.</li>
   <li>רביעייה שלמה יורדת לשולחן אוטומטית. מי שנגמרים לו הקלפים יוצא מהמשחק.</li>
   <li>רואים רק את השאלה האחרונה, אז כדאי לזכור מי ביקש מה!</li>
   <li>כשכל הרביעיות על השולחן, מנצח מי שאסף הכי הרבה.</li>
@@ -71,7 +71,7 @@ export function renderQuartets(v, ui) {
     ? `<div class="qask">
         <div class="qq-line"><b>${esc(v.players[last.from].name)}</b> שאל/ה את <b>${esc(v.players[last.to].name)}</b>:</div>
         <div class="qq-big">"יש לך ${rankMany(last.rank)}?"</div>
-        <div class="qq-ans ${last.got ? 'yes' : 'no'}">${last.got ? `✅ קיבל/ה ${last.got === 1 ? 'קלף אחד' : `${last.got} קלפים`}` : '❌ אין! התור עבר הלאה'}</div>
+        <div class="qq-ans ${last.got ? 'yes' : 'no'}">${last.got ? `✅ קיבל/ה ${last.got === 1 ? 'קלף אחד' : `${last.got} קלפים`}` : '❌ אין!'}</div>
       </div>`
     : `<div class="qask"><div class="qq-big">🔀 סדר התורות</div><div class="qq-line">${v.order.map(i => esc(v.players[i].name)).join(' ← ')}</div></div>`;
   const laid = v.players.reduce((s, p) => s + p.quartets.length, 0);
