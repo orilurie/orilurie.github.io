@@ -401,3 +401,92 @@ button.pulse { animation: pulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 0 r
   background: var(--ink); color: var(--bg); font-weight: 700; font-size: .85rem;
   padding: 6px 14px; border-radius: 999px; box-shadow: var(--shadow); animation: fadeIn .3s;
 }
+
+/* ---- game picker (home) ---- */
+.game-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 6px; }
+.game-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px;
+  border-radius: 16px; border: 2px solid var(--line); background: var(--bg);
+}
+.game-card .gc-icon { font-size: 34px; line-height: 1; }
+.game-card.on { border-color: var(--accent); background: var(--panel); box-shadow: 0 0 0 3px rgba(255, 138, 61, .25); }
+.lobby-game { font-weight: 800; color: var(--accent); margin-bottom: 4px; }
+
+/* ---- רביעיות ---- */
+.pcard {
+  --w: 46px;
+  width: var(--w); height: calc(var(--w) * 1.4); flex-shrink: 0;
+  border-radius: calc(var(--w) * .14); background: #fff; color: #1d1d1f;
+  border: 1px solid rgba(0, 0, 0, .15); box-shadow: 0 2px 5px rgba(0, 0, 0, .18);
+  position: relative; display: flex; align-items: center; justify-content: center; user-select: none;
+}
+.pcard.red { color: #d0021b; }
+.pcard i { position: absolute; top: 3px; right: 4px; font-style: normal; font-weight: 800; font-size: calc(var(--w) * .26); line-height: .95; text-align: center; }
+.pcard b { font-size: calc(var(--w) * .48); line-height: 1; margin-top: calc(var(--w) * .25); }
+.pcard.back { background: repeating-linear-gradient(45deg, #2f5aa8, #2f5aa8 5px, #24488a 5px, #24488a 10px); border: 2px solid #fff; }
+.pcard.back span { display: none; }
+.pcard.mini { --w: 22px; box-shadow: none; }
+.pcard.mini i { font-size: 7px; top: 1px; right: 2px; }
+.pcard.mini b { font-size: 10px; margin-top: 4px; }
+.qopp { min-width: 104px; cursor: default; transition: transform .15s, border-color .2s, opacity .2s; }
+.qopp.clickable { cursor: pointer; }
+.qopp.clickable:hover { transform: translateY(-3px); }
+.qopp.out { opacity: .5; }
+.qfan { display: flex; justify-content: center; min-height: 31px; }
+.qfan .pcard + .pcard { margin-inline-start: -12px; }
+.qmeta { font-size: .78rem; color: var(--muted); margin-top: 4px; }
+.qchips { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin-top: 4px; min-height: 4px; }
+.qchip { background: var(--accent); color: var(--accent-ink); font-weight: 800; font-size: 11px; border-radius: 6px; padding: 1px 5px; }
+.qchips.mine { margin: 0 0 8px; }
+.qout { color: var(--muted); font-size: .85rem; }
+.qtable { flex-direction: column; align-items: center; gap: 8px; min-height: 140px; justify-content: center; color: #e8f3ee; text-align: center; }
+.qask .qq-line { font-size: .95rem; }
+.qask .qq-big { font-size: 1.5rem; font-weight: 800; margin: 4px 0; color: #fff; }
+.qq-ans { display: inline-block; font-weight: 800; padding: 3px 12px; border-radius: 999px; margin-top: 2px; }
+.qq-ans.yes { background: #e8fbe9; color: #1b7a2a; }
+.qq-ans.no { background: #fde8e8; color: #b42318; }
+.qprogress { font-size: .8rem; opacity: .85; }
+.qhand { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 8px; }
+.qgroup {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border-radius: 12px;
+  border: 2px solid transparent; transition: transform .15s, border-color .15s; touch-action: none;
+}
+.qgroup.clickable { cursor: pointer; }
+.qgroup.clickable:hover { transform: translateY(-4px); }
+.qgroup.sel { border-color: var(--accent); background: rgba(255, 138, 61, .12); transform: translateY(-8px); }
+.qstack { display: flex; }
+.qstack .pcard + .pcard { margin-inline-start: -26px; }
+.qcount { font-size: 11px; color: var(--muted); font-weight: 700; }
+.qbubble {
+  position: fixed; z-index: 37; pointer-events: none; white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis;
+  background: #fff; color: #1d1d1f; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 14px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .25);
+}
+.qbubble::after { content: ''; position: absolute; bottom: -6px; left: 50%; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: #fff; }
+.qbubble.no { background: #fde8e8; color: #b42318; }
+.qbubble.no::after { border-top-color: #fde8e8; }
+.qbubble.yes { background: #fff4cc; color: #8a5a00; }
+.qbubble.yes::after { border-top-color: #fff4cc; }
+.qopp.drop-ok, .me.drop-ok { outline: 3px dashed var(--hl); outline-offset: 3px; }
+.qopp.drop-hover { outline-style: solid; transform: scale(1.06); }
+.qopp.drop-ok[data-hint] { position: relative; }
+.qopp.drop-ok[data-hint]::after {
+  content: attr(data-hint); position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%);
+  background: var(--hl); color: #2b2420; font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+}
+.qgroup.draggable { cursor: grab; }
+body.dragging #app .qgroup:not(.drag-src) { opacity: .5; }
+.qgroup.drag-src { opacity: .25; }
+.results td:last-child { font-size: .85rem; color: var(--muted); }
+@media (max-width: 520px) {
+  .pcard { --w: 42px; }
+  .qstack .pcard + .pcard { margin-inline-start: -24px; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .qtable { min-height: 0; }
+  .qask .qq-big { font-size: 1.15rem; }
+  .pcard { --w: 38px; }
+  .qstack .pcard + .pcard { margin-inline-start: -22px; }
+  .qopp { min-width: 90px; }
+}
+.qopp.askable { outline: 3px dashed var(--accent); outline-offset: 3px; animation: dropPulse 1s ease-in-out infinite; }

@@ -1,7 +1,7 @@
 // Animations. Cards "fly" as ghost copies on a fixed layer between their old and new spots
 // (snapshot before render -> render -> animate from old rects to new elements).
 
-import { play, haptic } from './sfx.js?v=19';
+import { play, haptic } from './sfx.js?v=20';
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -42,14 +42,16 @@ function setFace(g, html, w) {
 const isBack = html => /class="card back/.test(html);
 
 // Fly a card from a snapshot entry to the element with key toKey, flipping if the face changes.
-export async function fly(from, toKey, { delay = 0, duration = 520, arc = 46, spin = -8, scaleMid = 1.12 } = {}) {
+export async function fly(from, toKey, { delay = 0, duration = 520, arc = 46, spin = -8, scaleMid = 1.12, hide = true, size = null } = {}) {
   const toEl = $k(toKey);
   if (!from || !toEl) return;
   if (reduced()) return;
-  const to = toEl.getBoundingClientRect();
-  const endHtml = toEl.outerHTML;
-  const flip = isBack(from.html) !== toEl.classList.contains('back');
-  toEl.style.visibility = 'hidden';
+  // size: land as a card of this width at the target's centre (when the target is a box, not a card).
+  const box = toEl.getBoundingClientRect();
+  const to = size ? { left: box.left + box.width / 2 - size / 2, top: box.top + box.height / 2 - size * 0.7, width: size, height: size * 1.4 } : box;
+  const endHtml = size ? from.html : toEl.outerHTML;
+  const flip = !size && isBack(from.html) !== toEl.classList.contains('back');
+  if (hide) toEl.style.visibility = 'hidden';
   if (delay) await wait(delay);
   const g = makeGhost(from.html, from.rect);
   const a = center(from.rect), b = center(to);
@@ -70,7 +72,7 @@ export async function fly(from, toKey, { delay = 0, duration = 520, arc = 46, sp
   await move.finished;
   g.remove();
   const now = $k(toKey);
-  if (now) {
+  if (now && hide) {
     now.style.visibility = '';
     now.animate([{ transform: 'scale(1.1)' }, { transform: 'scale(.97)' }, { transform: 'scale(1)' }], { duration: 220, easing: 'ease-out' });
   }
@@ -178,7 +180,7 @@ export function turnFx() {
   if (st && !reduced()) st.animate([{ transform: 'scale(.85)', opacity: 0 }, { transform: 'scale(1.06)', opacity: 1 }, { transform: 'scale(1)' }], { duration: 420, easing: 'ease-out' });
 }
 
-function burst(sel, icon) {
+export function burst(sel, icon) {
   const el = document.querySelector(sel);
   if (!el || reduced()) return;
   const c = center(el.getBoundingClientRect());

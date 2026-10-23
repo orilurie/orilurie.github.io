@@ -1,10 +1,18 @@
-import { createGame, applyAction, viewFor, POWERS, MIN_PLAYERS, MAX_PLAYERS } from './game.js?v=19';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=19';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=19';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=19';
+import * as Hathatul from './game.js?v=20';
+import * as Quartets from './quartets.js?v=20';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=20';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=20';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=20';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=20';
 
+const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
+// The games this app can host. A room is created for one game; joiners just follow the room.
+const GAMES = {
+  hathatul: { rules: Hathatul, name: 'חתחתול', icon: '🐱', blurb: 'שמרו את החתולים, היפטרו מהעכברים!' },
+  quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
+};
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 19; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 20; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -48,6 +56,7 @@ if (!pid) {
 const ui = {
   screen: 'home', // home | connecting | lobby | game
   name: store.get('hathatul-name') || '',
+  gameType: GAMES[store.get('hathatul-game')] ? store.get('hathatul-game') : 'hathatul', // picked on the home screen
   joinCode: new URLSearchParams(location.search).get('room') || '',
   error: '',
   room: null, // { code, players, started, isHost }
@@ -64,7 +73,8 @@ let send = () => {}; // sends a message to the host (or handles it locally when 
 
 // ---------- Host ----------
 function startHosting(code) {
-  const room = { code, players: [], game: null };
+  const room = { code, type: ui.gameType, players: [], game: null };
+  const rules = GAMES[room.type].rules;
   const cidToPid = new Map();
   let transport;
 
@@ -75,28 +85,22 @@ function startHosting(code) {
   };
   const roomSummary = () => ({
     code,
+    type: room.type,
     started: !!room.game,
     players: room.players.map((p, i) => ({ name: p.name, connected: p.connected, isHost: i === 0 })),
   });
   const sendState = p => sendTo(p, {
-    t: 'room', room: { ...roomSummary(), isHost: p.pid === pid }, view: room.game ? viewFor(room.game, p.pid) : null,
+    t: 'room', room: { ...roomSummary(), isHost: p.pid === pid }, view: room.game ? rules.viewFor(room.game, p.pid) : null,
   });
   const broadcast = () => {
-    const summary = {
-      code,
-      started: !!room.game,
-      players: room.players.map((p, i) => ({ name: p.name, connected: p.connected, isHost: i === 0 })),
-    };
-    for (const p of room.players) {
-      sendTo(p, { t: 'room', room: { ...summary, isHost: p.pid === pid }, view: room.game ? viewFor(room.game, p.pid) : null });
-    }
+    for (const p of room.players) sendState(p);
   };
   const handle = (cid, msg) => {
     if (msg.t === 'join') {
       let p = room.players.find(x => x.pid === msg.pid);
       if (!p) {
         if (room.game) return reply(cid, 'המשחק כבר התחיל');
-        if (room.players.length >= MAX_PLAYERS) return reply(cid, 'החדר מלא');
+        if (room.players.length >= rules.MAX_PLAYERS) return reply(cid, 'החדר מלא');
         p = { pid: msg.pid, name: String(msg.name || 'שחקן').slice(0, 16) };
         room.players.push(p);
       }
@@ -117,8 +121,8 @@ function startHosting(code) {
     const isHost = room.players[0] === p;
     if (msg.t === 'start') {
       if (!isHost || room.game) return;
-      if (room.players.length < MIN_PLAYERS) return reply(cid, `צריך לפחות ${MIN_PLAYERS} שחקנים`);
-      room.game = createGame(room.players.map(x => ({ id: x.pid, name: x.name })));
+      if (room.players.length < rules.MIN_PLAYERS) return reply(cid, `צריך לפחות ${rules.MIN_PLAYERS} שחקנים`);
+      room.game = rules.createGame(room.players.map(x => ({ id: x.pid, name: x.name })));
       return broadcast();
     }
     if (msg.t === 'emoji' && room.game) {
@@ -131,7 +135,7 @@ function startHosting(code) {
     }
     if (msg.t === 'action' && room.game) {
       if (msg.action.type === 'nextRound' && !isHost) return;
-      const res = applyAction(room.game, p.pid, msg.action);
+      const res = rules.applyAction(room.game, p.pid, msg.action);
       if (res.error) return reply(cid, res.error);
       for (const pr of res.privates) sendTo(room.players.find(x => x.pid === pr.to), pr.msg);
       broadcast();
@@ -175,9 +179,11 @@ function startHosting(code) {
 function startTestRoom(n) {
   const names = [ui.name || 'שחקן 1', ...Array.from({ length: n - 1 }, (_, i) => `שחקן ${i + 2}`)];
   const ids = [pid, ...names.slice(1).map((_, i) => `test${i + 2}`)];
+  const type = ui.gameType;
+  const { createGame, applyAction, viewFor } = GAMES[type].rules;
   const game = createGame(ids.map((id, i) => ({ id, name: names[i] })));
   const room = {
-    code: 'TEST', started: true, isHost: true, test: true,
+    code: 'TEST', type, started: true, isHost: true, test: true,
     players: names.map((name, i) => ({ name, connected: true, isHost: i === 0 })),
   };
   const push = () => {
@@ -186,7 +192,7 @@ function startTestRoom(n) {
   };
   // Every card is visible here, so the start-of-round peek step is skipped.
   const readyAll = () => {
-    for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, { type: 'ready' });
+    if (game.ready) for (const p of game.players) if (!game.ready.has(p.id)) applyAction(game, p.id, { type: 'ready' });
   };
   send = msg => {
     if (msg.t === 'emoji') return receive({ t: 'emoji', e: msg.e, from: game.turn, name: game.players[game.turn].name });
@@ -284,7 +290,7 @@ function receive(msg) {
     } else {
       ui.lastEventId = 0; // in the lobby: animate everything from the first deal
     }
-    if (fresh.some(e => e.type === 'roundEnd')) ui.resultsReady = false;
+    if (fresh.some(e => e.type === 'roundEnd' || e.type === 'end')) ui.resultsReady = false;
     ui.room = msg.room;
     const prevTurnKey = ui.view && `${ui.view.round}-${ui.view.turn}-${ui.view.pending?.type}`;
     ui.view = msg.view;
@@ -321,8 +327,9 @@ function receive(msg) {
 function animate(fresh, before, prev) {
   const v = ui.view;
   const myTurn = x => x && x.phase === 'play' && x.turn === x.me;
-  playEvents(fresh, before, v).catch(() => {}).then(() => {
-    if (fresh.some(e => e.type === 'roundEnd')) {
+  const play_ = v.type === 'quartets' ? playQuartetEvents : playEvents;
+  play_(fresh, before, v).catch(() => {}).then(() => {
+    if (fresh.some(e => e.type === 'roundEnd' || e.type === 'end')) {
       ui.resultsReady = true;
       render();
       const meId = v.players[v.me].id;
@@ -404,19 +411,37 @@ function render() {
     return;
   }
   if (ui.screen === 'lobby') return renderLobby();
-  renderGame();
-  for (const el of $app.querySelectorAll('.card[data-k]')) if (dragTargets(el.dataset.k)) el.classList.add('draggable');
+  if (ui.room.type === 'quartets') {
+    ui.headerButtons = headerButtons();
+    ui.emojiBar = emojiBar();
+    $app.innerHTML = renderQuartets(ui.view, ui);
+  } else {
+    renderGame();
+  }
+  for (const el of $app.querySelectorAll('[data-k]')) if (dragTargets(el.dataset.k)) el.classList.add('draggable');
 }
+
+// Shared by both games' screens.
+const headerButtons = () => `
+  ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
+  <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
+  <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
+  ${ui.room.test && ui.room.type !== 'quartets' ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}`;
+const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>`;
 
 function renderHome() {
   $app.innerHTML = `
     <div class="panel home">
-      <h1>חתחתול <span>🐱🐭</span></h1>
-      <p class="sub">משחק קלפים אונליין ל-2 עד 6 שחקנים. שמרו את החתולים, היפטרו מהעכברים!</p>
+      <h1>${GAMES[ui.gameType].name} <span>${ui.gameType === 'quartets' ? '🃏♥️' : '🐱🐭'}</span></h1>
+      <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
+        ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
+          <span class="gc-icon">${g.icon}</span><b>${g.name}</b></button>`).join('')}
+      </div>
+      <p class="sub">משחק קלפים אונליין ל-2 עד 6 שחקנים. ${GAMES[ui.gameType].blurb}</p>
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
       <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
-      <button class="primary" data-act="create">צור חדר חדש</button>
-      <div class="or">או הצטרף לחדר קיים</div>
+      <button class="primary" data-act="create">צור חדר ${GAMES[ui.gameType].name}</button>
+      <div class="or">או הצטרף לחדר קיים (המשחק נקבע לפי החדר)</div>
       <div class="row">
         <input id="code" maxlength="4" value="${esc(ui.joinCode)}" placeholder="קוד חדר" dir="ltr">
         <button data-act="join">הצטרף</button>
@@ -428,7 +453,7 @@ function renderHome() {
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
       ${installHtml()}
-      <details class="rules"><summary>איך משחקים?</summary>${rulesHtml()}</details>
+      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${ui.gameType === 'quartets' ? quartetsRulesHtml() : rulesHtml()}</details>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
@@ -465,13 +490,14 @@ function renderLobby() {
   const link = `${location.origin}${location.pathname}?${new URLSearchParams({ ...localParam(), room: r.code })}`;
   $app.innerHTML = `
     <div class="panel lobby">
+      <div class="lobby-game">${GAMES[r.type]?.icon || ''} ${GAMES[r.type]?.name || ''}</div>
       <h2>חדר <span class="code" dir="ltr">${r.code}</span></h2>
       <p class="sub">שלחו לחברים את הקישור או את הקוד:</p>
       <div class="row"><input readonly value="${esc(link)}" dir="ltr" id="link"><button data-act="copy">העתק</button></div>
-      <h3>שחקנים (${r.players.length}/${MAX_PLAYERS})</h3>
+      <h3>שחקנים (${r.players.length}/${GAMES[r.type]?.rules.MAX_PLAYERS || MAX_PLAYERS})</h3>
       <ul class="plist">${r.players.map(p => `<li>${p.isHost ? '👑 ' : '🐱 '}${esc(p.name)}</li>`).join('')}</ul>
       ${r.isHost
-        ? `<button class="primary" data-act="start" ${r.players.length < MIN_PLAYERS ? 'disabled' : ''}>התחל משחק</button>
+        ? `<button class="primary" data-act="start" ${r.players.length < MIN_PLAYERS ? 'disabled' : ''}>התחל ${GAMES[r.type]?.name || 'משחק'}</button>
            ${r.players.length < MIN_PLAYERS ? `<p class="sub">מחכים לשחקנים נוספים…</p>` : ''}`
         : `<p class="sub">מחכים שהמארח/ת יתחיל/ה את המשחק…</p>`}
       <p class="hint">המארח/ת צריך/ה להשאיר את הדף פתוח לאורך כל המשחק.</p>
@@ -561,10 +587,7 @@ function renderGame() {
   $app.innerHTML = `
     <header class="top">
       <div><b>חתחתול</b> · ${ui.room.test ? '🧪 חדר בדיקה' : `חדר <span dir="ltr">${ui.room.code}</span>`} · סיבוב ${v.round}</div>
-      ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
-      <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
-      <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
-      ${ui.room.test ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}
+      ${headerButtons()}
     </header>
     ${v.calledBy !== null && v.phase === 'play' ? `<div class="lastcall">📣 ${esc(v.players[v.calledBy].name)} קרא/ה חתחתול! ${v.calledBy === v.me ? 'מחכים שכולם ישחקו תור אחרון…' : 'זה הסבב האחרון!'}</div>` : ''}
     <section class="opps">${opps}</section>
@@ -579,7 +602,7 @@ function renderGame() {
       <div class="oname">${badge(v.me)}${v.calledBy === v.me ? '📣 ' : ''}${esc(meP.name)} ${ui.room.test ? "(בתור)" : "(את/ה)"} <span class="pts">${meP.total} נק׳</span></div>
       <div class="hand">${myHand}</div>
     </section>
-    <div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>
+    ${emojiBar()}
     ${ui.showLog && ui.room.test ? `<section class="log">${v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join('')}</section>` : ''}
     ${v.phase === 'roundEnd' && ui.resultsReady ? resultsHtml(v) : ''}
     ${ui.confirmCall ? `<div class="overlay"><div class="panel confirm-call" role="dialog" aria-modal="true">
@@ -618,6 +641,9 @@ let drag = null; // in-progress drag
 let dropped = null; // card dropped on a target, waiting for the host's answer
 
 function dragTargets(key) {
+  if (ui.room?.type === 'quartets') {
+    return ui.screen === 'game' ? quartetsDragTargets(key, ui.view, (type, extra) => send({ t: 'action', action: { type, ...extra } })) : null;
+  }
   const v = ui.view;
   if (ui.screen !== 'game' || !v || v.phase !== 'play' || v.turn !== v.me) return null;
   const pend = v.pending, me = v.me;
@@ -738,6 +764,7 @@ function unlockScroll() {
 
 // Why a card can't be dragged right now (shown when someone tries).
 function whyNotDraggable(key) {
+  if (ui.room?.type === 'quartets') return quartetsWhy(key, ui.view);
   const v = ui.view;
   if (!v) return null;
   const meP = v.players[v.me];
@@ -760,7 +787,7 @@ function whyNotDraggable(key) {
 let nudge = null;
 
 $app.addEventListener('pointerdown', e => {
-  const el = e.target.closest('.card[data-k]');
+  const el = e.target.closest('[data-k]');
   nudge = el && !el.classList.contains('draggable') && $app.classList.contains('game') ? { el, x0: e.clientX, y0: e.clientY } : null;
   dbg(`down ${e.pointerType} ${el ? el.dataset.k : '-'} ${el?.classList.contains('draggable') ? 'draggable' : 'not-draggable'}${drag ? ' BUSY-drag' : ''}${dropped ? ' BUSY-drop' : ''}`);
   if (e.button !== 0 || drag || dropped) return;
@@ -837,7 +864,7 @@ addEventListener('pointerup', e => {
 // Stop the page from scrolling as soon as a finger lands on a draggable card. WebKit
 // (every iPhone browser, and in-app browsers) decides to scroll on touchstart.
 $app.addEventListener('touchstart', e => {
-  if (e.target.closest('.card.draggable')) e.preventDefault();
+  if (e.target.closest('.draggable')) e.preventDefault();
   dbg(`touchstart prevented=${e.defaultPrevented}`);
 }, { passive: false });
 
@@ -903,6 +930,17 @@ function onAct(el) {
     }
     case 'exitTest': location.href = homeUrl(); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
+    case 'pickGame':
+      ui.gameType = el.dataset.g;
+      store.set('hathatul-game', ui.gameType);
+      ui.name = document.getElementById('name')?.value.trim() || ui.name;
+      return render();
+    case 'qSelect': ui.qRank = ui.qRank === el.dataset.r ? null : el.dataset.r; return render();
+    case 'qAsk':
+      if (!ui.qRank) { toast('קודם בחרו ערך מהיד שלכם'); play('nope'); return; }
+      extra = { target: Number(el.dataset.p), rank: ui.qRank };
+      ui.qRank = null;
+      return action('ask');
     case 'install':
       installPrompt?.prompt();
       installPrompt?.userChoice.finally(() => { installPrompt = null; render(); });
@@ -939,7 +977,7 @@ $app.addEventListener('click', e => {
 $app.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.matches('#code, #name')) {
     onAct({ dataset: { act: e.target.id === 'code' || ui.joinCode ? 'join' : 'create' } });
-  } else if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card[data-act]')) {
+  } else if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card[data-act], .qgroup[data-act], .qopp[data-act]')) {
     e.preventDefault();
     onAct(e.target);
   }
