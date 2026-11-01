@@ -193,3 +193,39 @@ export function setWeight(date, kg) {
 export function latestWeight() {
   return state.weights.length ? state.weights[state.weights.length - 1].kg : null;
 }
+
+// ---------- targets that change over time ----------
+// state.targets holds the original targets; state.targetHistory = [{ from: 'YYYY-MM-DD', kcal, p, c, f }]
+// sorted by date. A day uses the last change made on or before it, so a change never affects earlier days.
+
+const TARGET_KEYS = ['kcal', 'p', 'c', 'f'];
+
+export function targetsFor(key) {
+  let t = state.targets;
+  for (const e of state.targetHistory || []) if (e.from <= key) t = e;
+  const out = {};
+  for (const k of TARGET_KEYS) out[k] = +t[k] || 0;
+  return out;
+}
+
+export function setTargetsFrom(key, vals) {
+  const entry = { from: key };
+  for (const k of TARGET_KEYS) entry[k] = +vals[k] || 0;
+  const list = (state.targetHistory || []).filter(e => e.from !== key);
+  list.push(entry);
+  list.sort((a, b) => a.from.localeCompare(b.from));
+  state.targetHistory = list;
+  save();
+}
+
+export function deleteTargetChange(key) {
+  state.targetHistory = (state.targetHistory || []).filter(e => e.from !== key);
+  save();
+}
+
+// The next change after this day, if any (its targets take over from that date).
+export function nextTargetChange(key) {
+  return (state.targetHistory || []).find(e => e.from > key) || null;
+}
+
+export const trackWater = () => state.trackWater === true;

@@ -325,3 +325,28 @@ select.input { appearance: auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #tabs[hidden] { display: none; }
 .auth-msg.ok { color: var(--accent); }
+
+/* ---------- target edit & switches ---------- */
+button.eaten {
+  border: 0; background: none; padding: 0; width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; text-align: start;
+}
+.edit-pen {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font-size: .9rem;
+}
+.sub-h { font-size: .95rem; margin: 14px 0 2px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.switch {
+  appearance: none; -webkit-appearance: none; flex: none;
+  width: 50px; height: 30px; border-radius: 99px; background: var(--line);
+  position: relative; cursor: pointer; transition: background .2s; margin: 0;
+}
+.switch::after {
+  content: ''; position: absolute; top: 3px; inset-inline-start: 3px;
+  width: 24px; height: 24px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: inset-inline-start .2s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { inset-inline-start: 23px; }

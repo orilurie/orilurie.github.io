@@ -3,14 +3,15 @@ import {
   allFoods, getFood, saveFood, deleteFood, unitsOf, touchRecent,
   makeItem, quickItem, reamount, amountLabel, sum,
   day, peekDay, planItems, setWeight, latestWeight, onSave,
-} from './store.js?v=3';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=3';
+  targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
+} from './store.js?v=4';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=4';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
-} from './cloud.js?v=3';
+} from './cloud.js?v=4';
 
-export const VERSION = 3; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 4; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -136,7 +137,7 @@ function itemRow(it, act, extra = '') {
 
 function viewToday() {
   const d = peekDay(curDay);
-  const T = state.targets;
+  const T = targetsFor(curDay);
   const tot = sum(d.entries);
   const isToday = curDay === dateKey();
   const hasPlan = state.meals.some(m => (state.plan[m.id] || []).length);
@@ -184,7 +185,7 @@ function viewToday() {
   }
 
   const water = d.waterMl || 0;
-  const wT = T.waterMl || 0;
+  const wT = state.targets.waterMl || 0;
   return `
   <div class="daynav">
     <button class="icon-btn" data-act="day" data-delta="-1" aria-label="יום קודם">›</button>
@@ -195,12 +196,12 @@ function viewToday() {
   <section class="card summary">
     ${ring(tot.kcal, T.kcal)}
     <div class="summary-side">
-      <div class="eaten"><b>${tot.kcal.toLocaleString('he-IL')}</b> / ${(+T.kcal).toLocaleString('he-IL')} קק״ל</div>
+      <button class="eaten" data-act="edit-targets"><span><b>${tot.kcal.toLocaleString('he-IL')}</b> / ${(+T.kcal).toLocaleString('he-IL')} קק״ל</span><span class="edit-pen" aria-label="שינוי יעד">✎</span></button>
       ${MACROS.map(([k, l, c]) => bar(l, tot[k], T[k], c)).join('')}
     </div>
   </section>
 
-  <section class="card water">
+  ${trackWater() ? `<section class="card water">
     <div class="water-info">
       <span class="water-icon" aria-hidden="true">💧</span>
       <div><b>${r1(water / 1000)}</b> / ${r1(wT / 1000)} ליטר מים</div>
@@ -210,14 +211,14 @@ function viewToday() {
       <button class="btn" data-act="water" data-ml="250">＋ כוס</button>
     </div>
     <div class="bar-track"><div class="bar-fill" style="width:${wT ? Math.min(water / wT, 1) * 100 : 0}%;background:var(--water)"></div></div>
-  </section>
+  </section>` : ''}
 
   ${hasPlan ? '' : `<div class="hint">💡 עוד לא הוזן תפריט. בלשונית <b>התפריט</b> אפשר להזין את התפריט מהמאמן, ואז כאן רק מסמנים מה אכלת.</div>`}
   ${meals}`;
 }
 
 function viewPlan() {
-  const T = state.targets;
+  const T = targetsFor(dateKey());
   const all = state.meals.flatMap(m => state.plan[m.id] || []);
   const tot = sum(all);
   const meals = state.meals.map(meal => {
@@ -391,7 +392,7 @@ function accountCard() {
 }
 
 function viewSettings() {
-  const T = state.targets;
+  const T = targetsFor(dateKey());
   const P = state.profile || {};
   const field = (key, label, unit, val) => `
     <label class="field"><span>${label}</span>
@@ -404,13 +405,12 @@ function viewSettings() {
 
   <section class="card">
     <h3>יעדים יומיים</h3>
-    <p class="lead small">הכנס את היעדים שקיבלת מהמאמן.</p>
+    <p class="lead small">הכנס את היעדים שקיבלת מהמאמן. שינוי כאן חל מהיום והלאה, והימים הקודמים נשארים עם היעד שהיה להם. אפשר גם לשנות יעד מיום מסוים דרך ✎ במסך <b>היום</b>.</p>
     <div class="fields">
       ${field('kcal', 'קלוריות', 'קק״ל', T.kcal)}
       ${field('p', 'חלבון', 'גרם', T.p)}
       ${field('c', 'פחמימה', 'גרם', T.c)}
       ${field('f', 'שומן', 'גרם', T.f)}
-      ${field('water', 'מים', 'ליטר', r1((T.waterMl || 0) / 1000))}
     </div>
     <p class="lead small" id="macro-check"></p>
     <details class="calc">
@@ -431,6 +431,15 @@ function viewSettings() {
       <button class="btn" data-act="calc">חישוב</button>
       <div id="calc-out"></div>
     </details>
+    ${targetHistoryHtml()}
+  </section>
+
+  <section class="card">
+    <label class="switch-row">
+      <span><b>מעקב מים</b><br><small class="muted">כרטיס שתייה במסך היום</small></span>
+      <input type="checkbox" class="switch" id="track-water" ${trackWater() ? 'checked' : ''}>
+    </label>
+    ${trackWater() ? `<div class="fields one">${field('water', 'יעד מים יומי', 'ליטר', r1((state.targets.waterMl || 0) / 1000))}</div>` : ''}
   </section>
 
   <section class="card">
@@ -466,10 +475,68 @@ function viewSettings() {
   <p class="lead small center">ערכי המזונות במאגר הם הערכה. לשימוש אישי, לא תחליף לייעוץ מקצועי.</p>`;
 }
 
+function targetHistoryHtml() {
+  const h = state.targetHistory || [];
+  if (!h.length) return '';
+  const short = k => k.split('-').reverse().slice(0, 2).map(Number).join('.') + '.' + k.slice(2, 4);
+  const today = dateKey();
+  return `
+    <h4 class="sub-h">שינויי יעד</h4>
+    <div class="list">${[...h].reverse().map(e => `
+      <div class="row static">
+        <span class="row-main">
+          <span class="row-name">מ-${short(e.from)}${e.from > today ? ' <span class="tag">עתידי</span>' : ''}</span>
+          <span class="row-sub">${e.kcal} קק״ל · ${macroLine(e)}</span>
+        </span>
+        <button class="icon-btn small" data-act="del-target" data-date="${e.from}" aria-label="מחיקת השינוי">✕</button>
+      </div>`).join('')}
+      <div class="row static"><span class="row-main"><span class="row-name">יעד התחלתי</span>
+        <span class="row-sub">${state.targets.kcal} קק״ל · ${macroLine(state.targets)}</span></span></div>
+    </div>`;
+}
+
+function showTargetsSheet() {
+  const T = targetsFor(curDay);
+  const next = nextTargetChange(curDay);
+  const d = parseKey(curDay);
+  const nd = next && parseKey(next.from);
+  openSheet(`
+    ${sheetHead('שינוי יעד יומי')}
+    <p class="lead small">היעד החדש יחול מ<b>${dayTitle(curDay).replace(' · ', ' ')}</b> והלאה. ימים קודמים לא ישתנו.
+    ${next ? `<br>שימו לב: ב-${nd.getDate()}.${nd.getMonth() + 1} כבר מתוכנן שינוי אחר, והוא ימשיך לחול מאותו יום.` : ''}</p>
+    <div class="fields">
+      <label class="field"><span>קלוריות</span><input id="t-kcal" class="input" inputmode="decimal" value="${T.kcal}"></label>
+      <label class="field"><span>חלבון (ג׳)</span><input id="t-p" class="input" inputmode="decimal" value="${T.p}"></label>
+      <label class="field"><span>פחמימה (ג׳)</span><input id="t-c" class="input" inputmode="decimal" value="${T.c}"></label>
+      <label class="field"><span>שומן (ג׳)</span><input id="t-f" class="input" inputmode="decimal" value="${T.f}"></label>
+    </div>
+    <p class="lead small" id="t-check"></p>
+    <div class="btn-row">
+      <button class="btn" data-act="t-scale">התאם את המאקרו לקלוריות</button>
+      <button class="btn primary grow" data-act="t-save">שמירה</button>
+    </div>`);
+  updateTargetsCheck();
+}
+
+function readTargetsSheet() {
+  const v = id => num(document.getElementById(id).value);
+  return { kcal: v('t-kcal'), p: v('t-p'), c: v('t-c'), f: v('t-f') };
+}
+
+function updateTargetsCheck() {
+  const el = document.getElementById('t-check');
+  if (!el) return;
+  const t = readTargetsSheet();
+  const fromMacros = Math.round(t.p * 4 + t.c * 4 + t.f * 9);
+  const diff = fromMacros - t.kcal;
+  el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קק״ל` +
+    (Math.abs(diff) > 50 ? ` (${diff > 0 ? 'יותר' : 'פחות'} מהיעד ב-${Math.abs(diff)})` : ' ✓');
+}
+
 function updateMacroCheck() {
   const el = document.getElementById('macro-check');
   if (!el) return;
-  const T = state.targets;
+  const T = targetsFor(dateKey());
   const fromMacros = Math.round(T.p * 4 + T.c * 4 + T.f * 9);
   const diff = fromMacros - T.kcal;
   el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קק״ל` +
@@ -847,8 +914,25 @@ document.addEventListener('click', e => {
     case 'calc': calc(); break;
     case 'calc-apply': {
       const [kcal, p, c, f] = el.dataset.v.split(',').map(Number);
-      Object.assign(state.targets, { kcal, p, c, f });
-      save(); render(); toast('היעדים עודכנו'); break;
+      setTargetsFrom(dateKey(), { kcal, p, c, f });
+      render(); toast('היעדים עודכנו מהיום והלאה'); break;
+    }
+    case 'del-target':
+      if (confirm('למחוק את שינוי היעד הזה? הימים שלו יחזרו ליעד שהיה לפניו.')) { deleteTargetChange(el.dataset.date); render(); }
+      break;
+    case 'edit-targets': showTargetsSheet(); break;
+    case 't-scale': {
+      // Keeps protein and fat, and sets carbs so the macros add up to the calories.
+      const t = readTargetsSheet();
+      document.getElementById('t-c').value = Math.max(0, Math.round((t.kcal - t.p * 4 - t.f * 9) / 4));
+      updateTargetsCheck(); break;
+    }
+    case 't-save': {
+      const t = readTargetsSheet();
+      if (!(t.kcal > 0)) { toast('צריך יעד קלוריות'); break; }
+      setTargetsFrom(curDay, t);
+      closeSheet(); render(); toast(curDay === dateKey() ? 'היעד עודכן מהיום והלאה' : 'היעד עודכן מהיום הזה והלאה');
+      break;
     }
     case 'meal-add': state.meals.push({ id: 'm-' + uid(), name: 'ארוחה חדשה' }); save(); render(); break;
     case 'meal-up': case 'meal-down': {
@@ -903,16 +987,18 @@ document.addEventListener('input', e => {
   if (t.id === 'pick-search') { pick.query = t.value; renderPickList(); }
   else if (t.id === 'foods-search') { foodsQuery = t.value; renderFoodsList(); }
   else if (t.id === 'amt-qty') { amt.qty = num(t.value); renderAmountTotal(); }
+  else if (t.id && t.id.startsWith('t-')) updateTargetsCheck();
   else if (t.dataset.target) {
     const v = num(t.value);
-    if (t.dataset.target === 'water') state.targets.waterMl = Math.round(v * 1000);
-    else state.targets[t.dataset.target] = v;
-    save(); updateMacroCheck();
+    if (t.dataset.target === 'water') { state.targets.waterMl = Math.round(v * 1000); save(); }
+    else setTargetsFrom(dateKey(), { ...targetsFor(dateKey()), [t.dataset.target]: v });
+    updateMacroCheck();
   }
 });
 
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'track-water') { state.trackWater = t.checked; save(); render(); return; }
   if (t.dataset.mealName) {
     const m = state.meals.find(x => x.id === t.dataset.mealName);
     if (m) { m.name = t.value.trim() || m.name; save(); }
