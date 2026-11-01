@@ -3,14 +3,14 @@ import {
   allFoods, getFood, saveFood, deleteFood, unitsOf, touchRecent,
   makeItem, quickItem, reamount, amountLabel, sum,
   day, peekDay, planItems, setWeight, latestWeight, onSave,
-} from './store.js?v=2';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=2';
+} from './store.js?v=3';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=3';
 import {
-  cloudEnabled, initCloud, push, currentUser, deleteCloudData,
-  signInGoogle, signInEmail, resetPassword, signOut, authError,
-} from './cloud.js?v=2';
+  cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
+  signInEmail, signOut, authError,
+} from './cloud.js?v=3';
 
-export const VERSION = 2; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 3; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -356,22 +356,17 @@ function viewLogin() {
   <div class="login">
     <img class="login-logo" src="icons/icon-192.png" alt="">
     <h1>התזונה שלי</h1>
-    <p class="lead">מתחברים כדי שהנתונים יישמרו בענן, לא יימחקו, ויסתנכרנו בין הטלפון למחשב.</p>
+    <p class="lead">מתחברים כדי שהנתונים יישמרו בענן, לא יימחקו, ויסתנכרנו בין מכשירים.</p>
     <section class="card">
-      <button class="btn google wide" data-act="login-google" ${auth.busy ? 'disabled' : ''}>
-        <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-        המשך עם Google
-      </button>
-      <div class="or"><span>או עם מייל</span></div>
       <div class="fields one">
         <label class="field"><span>מייל</span><input id="a-email" class="input" type="email" autocomplete="email" dir="ltr" value="${esc(auth.email)}"></label>
         <label class="field"><span>סיסמה${up ? ' (לפחות 6 תווים)' : ''}</span><input id="a-pass" class="input" type="password" dir="ltr" autocomplete="${up ? 'new-password' : 'current-password'}"></label>
       </div>
-      ${auth.msg ? `<p class="auth-msg">${esc(auth.msg)}</p>` : ''}
+      ${up ? '' : '<p class="lead small">אותו מייל וסיסמה כמו באפליקציית הבית 🏡</p>'}
+      ${auth.msg ? `<p class="auth-msg ${auth.ok ? 'ok' : ''}">${esc(auth.msg)}</p>` : ''}
       <button class="btn primary wide" data-act="login-email" ${auth.busy ? 'disabled' : ''}>${auth.busy ? 'רגע…' : up ? 'הרשמה' : 'כניסה'}</button>
       <div class="auth-links">
         <button class="btn ghost" data-act="auth-mode">${up ? 'כבר יש לי חשבון' : 'אין לך חשבון? הרשמה'}</button>
-        ${up ? '' : '<button class="btn ghost" data-act="auth-forgot">שכחתי סיסמה</button>'}
       </div>
     </section>
     <button class="btn ghost wide muted-link" data-act="local-only">המשך בלי חשבון (נשמר רק בטלפון הזה)</button>
@@ -878,18 +873,15 @@ document.addEventListener('click', e => {
 
     // account
     case 'auth-mode': keepEmail(); auth.mode = auth.mode === 'up' ? 'in' : 'up'; auth.msg = ''; render(); break;
-    case 'login-google': runAuth(() => signInGoogle()); break;
     case 'login-email': {
       const email = document.getElementById('a-email').value, pass = document.getElementById('a-pass').value;
       if (!email) { auth.msg = 'צריך מייל'; render(); break; }
-      runAuth(() => signInEmail(email, pass, auth.mode === 'up'));
-      break;
-    }
-    case 'auth-forgot': {
-      keepEmail();
-      if (!auth.email) { auth.msg = 'כתבו את המייל ואז לחצו שוב על "שכחתי סיסמה"'; render(); break; }
-      resetPassword(auth.email).then(() => { auth.msg = 'נשלח מייל לאיפוס סיסמה (בדקו גם בספאם)'; render(); })
-        .catch(e => { auth.msg = authError(e); render(); });
+      runAuth(() => signInEmail(email, pass, auth.mode === 'up').then(r => {
+        if (r !== 'confirm') return;
+        auth.busy = false; auth.mode = 'in'; auth.ok = true;
+        auth.msg = 'נשלח אליך מייל אימות. אחרי שתאשרו אותו, חזרו לכאן והתחברו';
+        render();
+      }));
       break;
     }
     case 'local-only':
@@ -951,6 +943,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   const now = dateKey();
   if (now !== lastToday) { if (curDay === lastToday) curDay = now; lastToday = now; render(); }
+  refresh();
 });
 
 function keepEmail() {
@@ -960,7 +953,7 @@ function keepEmail() {
 
 function runAuth(fn) {
   keepEmail();
-  auth.busy = true; auth.msg = ''; render();
+  auth.busy = true; auth.msg = ''; auth.ok = false; render();
   fn().catch(e => { console.error(e); auth.busy = false; auth.msg = authError(e); render(); });
 }
 

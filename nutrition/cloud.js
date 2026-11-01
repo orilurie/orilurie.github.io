@@ -1,200 +1,231 @@
-// Cloud sync with Firebase (Auth + Firestore).
-// Layout: users/{uid} holds everything except the daily logs; users/{uid}/days/{YYYY-MM-DD} holds one day each.
-// Values are stored as JSON strings (Firestore does not allow nested arrays, which the food units use).
-// The local copy in localStorage stays the source the UI reads from; this module keeps it and the cloud in step.
-import { firebaseConfig } from './firebase-config.js?v=2';
+// Cloud sync with Supabase (the same project and user accounts as the home app).
+// Tables (see supabase.sql): nutrition_state = everything except the daily logs, one row per user;
+// nutrition_days = one row per user per day. Row level security limits each user to their own rows.
+// The local copy in localStorage stays what the UI reads; this module keeps it and the cloud in step.
 
-const SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
+const SUPABASE_URL = 'https://sgzphgypyjwozhhiunfq.supabase.co';
+// Public (publishable) key – meant to be in client code; access is enforced by the RLS policies.
+const SUPABASE_KEY = 'sb_publishable_MTJeFdvhOJfMUQFm3xSXfQ_R_P8mJ_X';
+const SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.1/+esm';
 
-export const cloudEnabled = !!firebaseConfig?.apiKey;
+export const cloudEnabled = true;
 
-let fb = null;          // loaded SDK functions + instances
+let sb = null;
 let user = null;
-let unsub = [];
-let synced = { meta: null, days: {} };  // last JSON known to be in the cloud
-let hooks = { getState: null, setState: null, onChange: null };
+let channel = null;
+let hooks = null;
+// Last version known to be in the cloud, as stable JSON. Keys: 'meta' and day keys.
+let synced = {};
+// Versions this device wrote, so their realtime echoes are recognized and ignored.
+let written = {};
+let dirty = new Set();   // keys whose last write failed (offline) – retried later
+let retryTimer = null;
 
 export const currentUser = () => user;
 
-const metaOf = s => { const { days, ...meta } = s; return meta; };
-const isEmptyDay = d => !d.entries?.length && !d.waterMl;
-
-async function load() {
-  if (fb) return fb;
-  const [app, auth, fs] = await Promise.all([
-    import(`${SDK}/firebase-app.js`),
-    import(`${SDK}/firebase-auth.js`),
-    import(`${SDK}/firebase-firestore.js`),
-  ]);
-  const a = app.initializeApp(firebaseConfig);
-  let db;
-  try {
-    db = fs.initializeFirestore(a, { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) });
-  } catch {
-    db = fs.getFirestore(a);
-  }
-  const au = auth.getAuth(a);
-  try { await auth.setPersistence(au, auth.indexedDBLocalPersistence); } catch {}
-  fb = { auth, fs, au, db };
-  return fb;
+// JSON with sorted keys: Postgres jsonb reorders keys, so plain JSON.stringify can't be compared.
+function stable(v) {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}`;
+  return JSON.stringify(v ?? null);
 }
 
-// hooks: getState() -> state, setState(state) replaces local state, onChange() re-renders, onUser(user|null)
+const metaOf = s => { const { days, ...meta } = s; return meta; };
+const isEmptyDay = d => !d?.entries?.length && !d?.waterMl;
+
+async function client() {
+  if (sb) return sb;
+  const { createClient } = await import(SDK);
+  sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'nutrition-auth' },
+  });
+  return sb;
+}
+
+// hooks: getState() -> state, setState(state) replaces local state, onChange() re-renders, onUser(user|null, error?)
 export async function initCloud(h) {
   hooks = h;
-  if (!cloudEnabled) { h.onUser(null); return; }
   try {
-    const { auth, au } = await load();
-    auth.onAuthStateChanged(au, async u => {
-      stopListening();
+    await client();
+  } catch (e) {
+    console.error('Supabase failed to load', e);
+    h.onUser(null, e);
+    return;
+  }
+  let first = true;
+  let currentId = null;
+  sb.auth.onAuthStateChange((event, session) => {
+    const u = session?.user || null;
+    // Token refreshes also fire this; only react when the signed-in person changes.
+    if (!first && (u?.id || null) === currentId) return;
+    first = false;
+    currentId = u?.id || null;
+    // Supabase recommends not awaiting other calls inside this callback.
+    setTimeout(async () => {
+      stopSync();
       user = u;
       if (u) {
         try { await startSync(); } catch (e) { console.error(e); }
       }
       h.onUser(u);
-    });
-  } catch (e) {
-    console.error('Firebase failed to load', e);
-    h.onUser(null, e);
-  }
+    }, 0);
+  });
 }
 
-const metaRef = () => fb.fs.doc(fb.db, 'users', user.uid);
-const daysCol = () => fb.fs.collection(fb.db, 'users', user.uid, 'days');
-const dayRef = k => fb.fs.doc(fb.db, 'users', user.uid, 'days', k);
+async function fetchAll() {
+  const [m, d] = await Promise.all([
+    sb.from('nutrition_state').select('data').eq('user_id', user.id).maybeSingle(),
+    sb.from('nutrition_days').select('day, data').eq('user_id', user.id),
+  ]);
+  if (m.error) throw m.error;
+  if (d.error) throw d.error;
+  return { meta: m.data?.data || null, days: d.data || [] };
+}
 
 async function startSync() {
-  const { fs } = fb;
+  synced = {}; written = {}; dirty = new Set();
   const local = hooks.getState();
   let owner = null;
   try { owner = localStorage.getItem('nutrition-owner'); } catch {}
-  // Local data that was never tied to an account is merged into the first account that signs in.
-  // Local data from a different account is dropped (the cloud has it).
-  const localUsable = !owner || owner === user.uid;
+  // Local data never tied to an account is merged into the first account that signs in;
+  // local data from a different account is dropped (it is in that account's cloud).
+  const localUsable = !owner || owner === user.id;
 
-  const [metaSnap, daysSnap] = await Promise.all([fs.getDoc(metaRef()), fs.getDocs(daysCol())]);
-  synced = { meta: null, days: {} };
+  const remote = await fetchAll();
   const next = { ...(localUsable ? local : {}), days: {} };
-
-  if (metaSnap.exists()) {
-    synced.meta = metaSnap.data().json;
-    Object.assign(next, JSON.parse(synced.meta));
+  if (remote.meta) {
+    synced.meta = stable(remote.meta);
+    Object.assign(next, remote.meta);
   }
-  daysSnap.forEach(d => { synced.days[d.id] = d.data().json; next.days[d.id] = JSON.parse(d.data().json); });
+  for (const row of remote.days) {
+    synced[row.day] = stable(row.data);
+    next.days[row.day] = row.data;
+  }
   if (localUsable) {
     for (const [k, d] of Object.entries(local.days || {})) if (!next.days[k] && !isEmptyDay(d)) next.days[k] = d;
   }
-
-  try { localStorage.setItem('nutrition-owner', user.uid); } catch {}
+  try { localStorage.setItem('nutrition-owner', user.id); } catch {}
   hooks.setState(next);
   push(hooks.getState());   // uploads whatever the cloud doesn't have yet
   listen();
 }
 
-function listen() {
-  const { fs } = fb;
-  unsub.push(fs.onSnapshot(metaRef(), snap => {
-    if (snap.metadata.hasPendingWrites || !snap.exists()) return;
-    const json = snap.data().json;
-    if (json === synced.meta) return;
-    synced.meta = json;
-    const s = hooks.getState();
-    hooks.setState({ ...JSON.parse(json), days: s.days });
-    hooks.onChange();
-  }));
-  unsub.push(fs.onSnapshot(daysCol(), snap => {
-    if (snap.metadata.hasPendingWrites) return;
-    let changed = false;
-    const s = hooks.getState();
-    const days = { ...s.days };
-    for (const ch of snap.docChanges()) {
-      const k = ch.doc.id;
-      if (ch.type === 'removed') {
-        if (days[k]) { delete days[k]; delete synced.days[k]; changed = true; }
-        continue;
-      }
-      const json = ch.doc.data().json;
-      if (json === synced.days[k]) continue;
-      synced.days[k] = json;
-      days[k] = JSON.parse(json);
-      changed = true;
-    }
-    if (changed) { hooks.setState({ ...s, days }); hooks.onChange(); }
-  }));
+function isEcho(key, data) {
+  const s = stable(data);
+  if (written[key]?.has(s)) { written[key].delete(s); return true; }
+  return s === synced[key];
 }
 
-function stopListening() {
-  unsub.forEach(f => f());
-  unsub = [];
+function applyRemote(key, data) {
+  if (dirty.has(key)) return false;           // our unsent change wins
+  if (isEcho(key, data)) return false;
+  synced[key] = stable(data);
+  const s = hooks.getState();
+  if (key === 'meta') hooks.setState({ ...data, days: s.days });
+  else hooks.setState({ ...s, days: { ...s.days, [key]: data } });
+  return true;
+}
+
+function listen() {
+  const uid = user.id;
+  channel = sb.channel(`nutrition-${uid}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'nutrition_state', filter: `user_id=eq.${uid}` }, p => {
+      if (p.new?.data && applyRemote('meta', p.new.data)) hooks.onChange();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'nutrition_days', filter: `user_id=eq.${uid}` }, p => {
+      if (p.new?.day && p.new?.data && applyRemote(p.new.day, p.new.data)) hooks.onChange();
+    })
+    .subscribe();
+}
+
+function stopSync() {
+  if (channel) { sb.removeChannel(channel); channel = null; }
+  clearTimeout(retryTimer);
+}
+
+// Catches changes missed while the phone was asleep (realtime doesn't replay them).
+export async function refresh() {
+  if (!user) return;
+  try {
+    const remote = await fetchAll();
+    let changed = false;
+    if (remote.meta) changed = applyRemote('meta', remote.meta) || changed;
+    for (const row of remote.days) changed = applyRemote(row.day, row.data) || changed;
+    if (changed) hooks.onChange();
+    if (dirty.size) push(hooks.getState());
+  } catch (e) { console.error(e); }
+}
+
+function write(key, data) {
+  const s = stable(data);
+  synced[key] = s;
+  (written[key] ||= new Set()).add(s);
+  dirty.delete(key);
+  const now = new Date().toISOString();
+  const req = key === 'meta'
+    ? sb.from('nutrition_state').upsert({ user_id: user.id, data, updated_at: now })
+    : sb.from('nutrition_days').upsert({ user_id: user.id, day: key, data, updated_at: now });
+  req.then(({ error }) => {
+    if (!error) return;
+    console.error(error);
+    if (synced[key] === s) { delete synced[key]; dirty.add(key); scheduleRetry(); }
+  });
+}
+
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => hooks && push(hooks.getState()), 20000);
 }
 
 // Called after every local save: writes only what changed since the last sync.
 export function push(state) {
-  if (!user || !fb) return;
-  const { fs } = fb;
-  const now = Date.now();
-  const meta = JSON.stringify(metaOf(state));
-  if (meta !== synced.meta) {
-    synced.meta = meta;
-    fs.setDoc(metaRef(), { json: meta, updatedAt: now }).catch(e => console.error(e));
-  }
+  if (!user || !sb) return;
+  const meta = metaOf(state);
+  if (stable(meta) !== synced.meta) write('meta', meta);
   for (const [k, d] of Object.entries(state.days || {})) {
-    const json = JSON.stringify(d);
-    if (json === synced.days[k]) continue;
-    if (synced.days[k] === undefined && isEmptyDay(d)) continue;
-    synced.days[k] = json;
-    fs.setDoc(dayRef(k), { json, updatedAt: now }).catch(e => console.error(e));
+    if (synced[k] === undefined && isEmptyDay(d) && !dirty.has(k)) continue;
+    if (stable(d) !== synced[k]) write(k, d);
   }
 }
+
+addEventListener('online', () => hooks && push(hooks.getState()));
 
 export async function deleteCloudData() {
-  if (!user || !fb) return;
-  const { fs } = fb;
-  const snap = await fs.getDocs(daysCol());
-  const batch = fs.writeBatch(fb.db);
-  snap.forEach(d => batch.delete(d.ref));
-  batch.delete(metaRef());
-  await batch.commit();
-  synced = { meta: null, days: {} };
+  if (!user || !sb) return;
+  const a = await sb.from('nutrition_days').delete().eq('user_id', user.id);
+  const b = await sb.from('nutrition_state').delete().eq('user_id', user.id);
+  if (a.error || b.error) throw a.error || b.error;
+  synced = {}; written = {}; dirty = new Set();
 }
 
-// ---------- auth ----------
+// ---------- auth (email + password, same accounts as the home app) ----------
 
-const ERRORS = {
-  'auth/invalid-credential': 'מייל או סיסמה לא נכונים',
-  'auth/wrong-password': 'מייל או סיסמה לא נכונים',
-  'auth/user-not-found': 'אין משתמש עם המייל הזה. אפשר להירשם',
-  'auth/email-already-in-use': 'כבר יש משתמש עם המייל הזה. נסו להתחבר',
-  'auth/weak-password': 'הסיסמה צריכה להיות לפחות 6 תווים',
-  'auth/invalid-email': 'כתובת מייל לא תקינה',
-  'auth/missing-password': 'צריך סיסמה',
-  'auth/too-many-requests': 'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות',
-  'auth/network-request-failed': 'אין חיבור לאינטרנט',
-  'auth/popup-closed-by-user': 'החלון נסגר לפני שההתחברות הסתיימה',
-  'auth/popup-blocked': 'הדפדפן חסם את חלון ההתחברות. נסו עם מייל וסיסמה',
-  'auth/unauthorized-domain': 'האתר לא מאושר בהגדרות Firebase (Authorized domains)',
-  'auth/operation-not-allowed': 'שיטת ההתחברות הזו לא מופעלת ב-Firebase',
-};
-export const authError = e => ERRORS[e?.code] || 'משהו השתבש. נסו שוב';
+const ERRORS = [
+  [/invalid login credentials/i, 'מייל או סיסמה לא נכונים'],
+  [/email not confirmed/i, 'צריך לאשר את המייל קודם (בדקו בתיבת הדואר)'],
+  [/already registered|already exists/i, 'כבר יש משתמש עם המייל הזה. נסו להתחבר'],
+  [/at least 6|weak password/i, 'הסיסמה צריכה להיות לפחות 6 תווים'],
+  [/invalid.*email|email.*invalid/i, 'כתובת מייל לא תקינה'],
+  [/rate limit|too many/i, 'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות'],
+  [/failed to fetch|network/i, 'אין חיבור לאינטרנט'],
+];
+export const authError = e => (ERRORS.find(([re]) => re.test(e?.message || '')) || [, 'משהו השתבש. נסו שוב'])[1];
 
-export async function signInGoogle() {
-  const { auth, au } = await load();
-  await auth.signInWithPopup(au, new auth.GoogleAuthProvider());
-}
-
+// Returns 'confirm' when the account was created but the email must be confirmed first.
 export async function signInEmail(email, password, create) {
-  const { auth, au } = await load();
-  if (create) await auth.createUserWithEmailAndPassword(au, email.trim(), password);
-  else await auth.signInWithEmailAndPassword(au, email.trim(), password);
-}
-
-export async function resetPassword(email) {
-  const { auth, au } = await load();
-  await auth.sendPasswordResetEmail(au, email.trim());
+  await client();
+  if (create) {
+    const { data, error } = await sb.auth.signUp({ email: email.trim(), password });
+    if (error) throw error;
+    return data.session ? 'ok' : 'confirm';
+  }
+  const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) throw error;
+  return 'ok';
 }
 
 export async function signOut() {
-  const { auth, au } = await load();
-  stopListening();
-  await auth.signOut(au);
+  await client();
+  stopSync();
+  await sb.auth.signOut();
 }

@@ -324,3 +324,4 @@ select.input { appearance: auto; }
 .spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #tabs[hidden] { display: none; }
+.auth-msg.ok { color: var(--accent); }
