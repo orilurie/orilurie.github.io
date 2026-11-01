@@ -2,11 +2,15 @@ import {
   state, save, replaceState, resetState, uid, dateKey, parseKey, shiftKey, r1,
   allFoods, getFood, saveFood, deleteFood, unitsOf, touchRecent,
   makeItem, quickItem, reamount, amountLabel, sum,
-  day, peekDay, planItems, setWeight, latestWeight,
-} from './store.js?v=1';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=1';
+  day, peekDay, planItems, setWeight, latestWeight, onSave,
+} from './store.js?v=2';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=2';
+import {
+  cloudEnabled, initCloud, push, currentUser, deleteCloudData,
+  signInGoogle, signInEmail, resetPassword, signOut, authError,
+} from './cloud.js?v=2';
 
-export const VERSION = 1; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 2; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -31,6 +35,11 @@ const $sheetBody = document.getElementById('sheet-body');
 const $toast = document.getElementById('toast');
 
 let tab = 'today';
+// 'app' | 'loading' (waiting to learn whether someone is signed in) | 'login'
+let screen = 'app';
+let auth = { mode: 'in', busy: false, msg: '', email: '' };
+const LOCAL_ONLY = 'nutrition-local-only';
+const isLocalOnly = () => { try { return localStorage.getItem(LOCAL_ONLY) === '1'; } catch { return false; } };
 let curDay = dateKey();
 let foodsQuery = '';
 let foodsCat = 'all';
@@ -76,6 +85,9 @@ function macroLine(t) {
 // ---------- rendering ----------
 
 function render() {
+  $tabs.hidden = screen !== 'app';
+  if (screen === 'loading') { $view.innerHTML = '<div class="splash"><div class="spinner"></div></div>'; return; }
+  if (screen === 'login') { $view.innerHTML = viewLogin(); return; }
   for (const b of $tabs.querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === tab);
   const views = { today: viewToday, plan: viewPlan, foods: viewFoods, weight: viewWeight, settings: viewSettings };
   $view.innerHTML = views[tab]();
@@ -338,6 +350,51 @@ function viewWeight() {
     </div>`).join('')}</section>` : ''}`;
 }
 
+function viewLogin() {
+  const up = auth.mode === 'up';
+  return `
+  <div class="login">
+    <img class="login-logo" src="icons/icon-192.png" alt="">
+    <h1>התזונה שלי</h1>
+    <p class="lead">מתחברים כדי שהנתונים יישמרו בענן, לא יימחקו, ויסתנכרנו בין הטלפון למחשב.</p>
+    <section class="card">
+      <button class="btn google wide" data-act="login-google" ${auth.busy ? 'disabled' : ''}>
+        <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        המשך עם Google
+      </button>
+      <div class="or"><span>או עם מייל</span></div>
+      <div class="fields one">
+        <label class="field"><span>מייל</span><input id="a-email" class="input" type="email" autocomplete="email" dir="ltr" value="${esc(auth.email)}"></label>
+        <label class="field"><span>סיסמה${up ? ' (לפחות 6 תווים)' : ''}</span><input id="a-pass" class="input" type="password" dir="ltr" autocomplete="${up ? 'new-password' : 'current-password'}"></label>
+      </div>
+      ${auth.msg ? `<p class="auth-msg">${esc(auth.msg)}</p>` : ''}
+      <button class="btn primary wide" data-act="login-email" ${auth.busy ? 'disabled' : ''}>${auth.busy ? 'רגע…' : up ? 'הרשמה' : 'כניסה'}</button>
+      <div class="auth-links">
+        <button class="btn ghost" data-act="auth-mode">${up ? 'כבר יש לי חשבון' : 'אין לך חשבון? הרשמה'}</button>
+        ${up ? '' : '<button class="btn ghost" data-act="auth-forgot">שכחתי סיסמה</button>'}
+      </div>
+    </section>
+    <button class="btn ghost wide muted-link" data-act="local-only">המשך בלי חשבון (נשמר רק בטלפון הזה)</button>
+  </div>`;
+}
+
+function accountCard() {
+  if (!cloudEnabled) return '';
+  const u = currentUser();
+  if (u) return `
+  <section class="card">
+    <h3>חשבון</h3>
+    <p class="lead small">מחובר/ת כ-<b dir="ltr">${esc(u.email || u.displayName || '')}</b><br>☁️ הנתונים נשמרים בענן ומסתנכרנים בין מכשירים.</p>
+    <button class="btn" data-act="sign-out">התנתקות</button>
+  </section>`;
+  return `
+  <section class="card">
+    <h3>חשבון</h3>
+    <p class="lead small">כרגע הנתונים נשמרים רק בטלפון הזה. אחרי התחברות הם יעלו לענן (כולל מה שכבר הזנת).</p>
+    <button class="btn primary" data-act="go-login">התחברות / הרשמה</button>
+  </section>`;
+}
+
 function viewSettings() {
   const T = state.targets;
   const P = state.profile || {};
@@ -348,6 +405,7 @@ function viewSettings() {
   const opt = (v, l, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${l}</option>`;
   return `
   <h2 class="page-title">הגדרות</h2>
+  ${accountCard()}
 
   <section class="card">
     <h3>יעדים יומיים</h3>
@@ -396,7 +454,7 @@ function viewSettings() {
 
   <section class="card">
     <h3>גיבוי</h3>
-    <p class="lead small">הנתונים נשמרים רק במכשיר הזה. כדאי לשמור גיבוי מדי פעם, וגם כדי להעביר את הנתונים לטלפון אחר.</p>
+    <p class="lead small">${currentUser() ? 'קובץ עם כל הנתונים, לשמירה אצלך.' : 'הנתונים נשמרים רק במכשיר הזה. כדאי לשמור גיבוי מדי פעם, וגם כדי להעביר את הנתונים לטלפון אחר.'}</p>
     <div class="btn-row">
       <button class="btn" data-act="export">שמירת גיבוי</button>
       <button class="btn" data-act="import">שחזור מגיבוי</button>
@@ -813,7 +871,37 @@ document.addEventListener('click', e => {
     case 'export': exportData(); break;
     case 'import': document.getElementById('import-file').click(); break;
     case 'reset':
-      if (confirm('למחוק את כל הנתונים? (כדאי לשמור גיבוי קודם)') && confirm('בטוח? אי אפשר לבטל.')) { resetState(); render(); toast('נמחק'); }
+      if (confirm(`למחוק את כל הנתונים${currentUser() ? ' (גם מהענן)' : ''}? כדאי לשמור גיבוי קודם.`) && confirm('בטוח? אי אפשר לבטל.')) {
+        deleteCloudData().catch(console.error).finally(() => { resetState(); render(); toast('נמחק'); });
+      }
+      break;
+
+    // account
+    case 'auth-mode': keepEmail(); auth.mode = auth.mode === 'up' ? 'in' : 'up'; auth.msg = ''; render(); break;
+    case 'login-google': runAuth(() => signInGoogle()); break;
+    case 'login-email': {
+      const email = document.getElementById('a-email').value, pass = document.getElementById('a-pass').value;
+      if (!email) { auth.msg = 'צריך מייל'; render(); break; }
+      runAuth(() => signInEmail(email, pass, auth.mode === 'up'));
+      break;
+    }
+    case 'auth-forgot': {
+      keepEmail();
+      if (!auth.email) { auth.msg = 'כתבו את המייל ואז לחצו שוב על "שכחתי סיסמה"'; render(); break; }
+      resetPassword(auth.email).then(() => { auth.msg = 'נשלח מייל לאיפוס סיסמה (בדקו גם בספאם)'; render(); })
+        .catch(e => { auth.msg = authError(e); render(); });
+      break;
+    }
+    case 'local-only':
+      try { localStorage.setItem(LOCAL_ONLY, '1'); } catch {}
+      screen = 'app'; render(); break;
+    case 'go-login': auth.msg = ''; screen = 'login'; render(); window.scrollTo(0, 0); break;
+    case 'sign-out':
+      if (!confirm('להתנתק? הנתונים נשארים שמורים בענן ויחזרו כשתתחברו.')) break;
+      signOut().then(() => {
+        resetState();
+        try { localStorage.removeItem('nutrition-owner'); localStorage.removeItem(LOCAL_ONLY); } catch {}
+      });
       break;
   }
 });
@@ -865,4 +953,34 @@ document.addEventListener('visibilitychange', () => {
   if (now !== lastToday) { if (curDay === lastToday) curDay = now; lastToday = now; render(); }
 });
 
+function keepEmail() {
+  const el = document.getElementById('a-email');
+  if (el) auth.email = el.value;
+}
+
+function runAuth(fn) {
+  keepEmail();
+  auth.busy = true; auth.msg = ''; render();
+  fn().catch(e => { console.error(e); auth.busy = false; auth.msg = authError(e); render(); });
+}
+
+// ---------- start ----------
+
+onSave(s => push(s));
+
+if (cloudEnabled && !isLocalOnly()) screen = 'loading';
 render();
+
+initCloud({
+  getState: () => state,
+  setState: s => replaceState(s),
+  onChange: () => { if (screen === 'app' && !$sheet.classList.contains('open')) render(); },
+  onUser: (u, err) => {
+    auth.busy = false;
+    if (u) { screen = 'app'; try { localStorage.removeItem(LOCAL_ONLY); } catch {} }
+    else if (cloudEnabled && !isLocalOnly() && !err) screen = 'login';
+    else screen = 'app';
+    if (err) toast('אין חיבור לענן כרגע');
+    render();
+  },
+});

@@ -35,8 +35,12 @@ function load() {
 
 export let state = load();
 
+let saveHook = null;
+export function onSave(fn) { saveHook = fn; }
+
 export function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  saveHook?.(state);
 }
 
 export function replaceState(next) {
