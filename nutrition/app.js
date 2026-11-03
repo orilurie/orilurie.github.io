@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=10';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=10';
+} from './store.js?v=11';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=11';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
   unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
-} from './cloud.js?v=10';
+} from './cloud.js?v=11';
 
-export const VERSION = 10; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 11; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -141,7 +141,7 @@ function itemRow(it, act, extra = '') {
       <span class="row-name">${esc(it.name)}</span>
       <span class="row-sub">${esc(amountLabel(it))}${it.n ? ' · ' : ''}${macroLine(it)}</span>
     </span>
-    <span class="row-kcal">${it.kcal}<small>קק״ל</small></span>
+    <span class="row-kcal">${it.kcal}<small>קלוריות</small></span>
   </button>`;
 }
 
@@ -170,7 +170,7 @@ function viewToday() {
           <span class="row-name">${esc(shown.name)}</span>
           <span class="row-sub">${esc(amountLabel(shown))}${shown.n ? ' · ' : ''}${macroLine(shown)}</span>
         </button>
-        <span class="row-kcal">${shown.kcal}<small>קק״ל</small></span>
+        <span class="row-kcal">${shown.kcal}<small>קלוריות</small></span>
       </div>`;
     }).join('');
     const allDone = plan.length && plan.every(p => entries.some(e => e.planItemId === p.id));
@@ -178,7 +178,7 @@ function viewToday() {
     <section class="card meal">
       <header class="meal-head">
         <h3>${esc(meal.name)}</h3>
-        <span class="meal-kcal">${eaten.kcal ? `${eaten.kcal} קק״ל` : ''}</span>
+        <span class="meal-kcal">${eaten.kcal ? `${eaten.kcal} קלוריות` : ''}</span>
       </header>
       ${plan.length ? `<div class="list">${planRows}</div>` : ''}
       ${extra.length ? `<div class="list extra">${plan.length ? '<div class="list-label">תוספות</div>' : ''}${extra.map(e => itemRow(e, 'edit-entry')).join('')}</div>` : ''}
@@ -206,7 +206,7 @@ function viewToday() {
   <section class="card summary">
     ${ring(tot.kcal, T.kcal)}
     <div class="summary-side">
-      <button class="eaten" data-act="edit-targets"><span><b>${tot.kcal.toLocaleString('he-IL')}</b> / ${(+T.kcal).toLocaleString('he-IL')} קק״ל</span><span class="edit-pen" aria-label="שינוי יעד">✎</span></button>
+      <button class="eaten" data-act="edit-targets"><span><b>${tot.kcal.toLocaleString('he-IL')}</b> / ${(+T.kcal).toLocaleString('he-IL')} קלוריות</span><span class="edit-pen" aria-label="שינוי יעד">✎</span></button>
       ${MACROS.map(([k, l, c]) => bar(l, tot[k], T[k], c)).join('')}
     </div>
   </section>
@@ -238,7 +238,7 @@ function viewPlan() {
     <section class="card meal">
       <header class="meal-head">
         <h3>${esc(meal.name)}</h3>
-        <span class="meal-kcal">${t.kcal ? `${t.kcal} קק״ל` : ''}</span>
+        <span class="meal-kcal">${t.kcal ? `${t.kcal} קלוריות` : ''}</span>
       </header>
       ${items.length ? `<div class="list">${items.map(it => itemRow(it, 'edit-plan', `data-meal="${meal.id}"`)).join('')}</div>` : ''}
       <div class="meal-actions"><button class="btn ghost" data-act="add-plan" data-meal="${meal.id}">＋ הוספה לתפריט</button></div>
@@ -248,7 +248,7 @@ function viewPlan() {
   <h2 class="page-title">התפריט שלי</h2>
   <p class="lead">כאן מזינים את התפריט הקבוע מהמאמן. במסך <b>היום</b> הוא יופיע כרשימה לסימון.</p>
   <section class="card plan-total">
-    <div class="plan-total-row"><span>סה״כ בתפריט</span><b>${tot.kcal} / ${T.kcal} קק״ל</b></div>
+    <div class="plan-total-row"><span>סה״כ בתפריט</span><b>${tot.kcal} / ${T.kcal} קלוריות</b></div>
     ${MACROS.map(([k, l, c]) => bar(l, tot[k], T[k], c)).join('')}
   </section>
   ${meals}
@@ -295,7 +295,7 @@ function foodRow(f, act) {
       <span class="row-name">${esc(f.name)}${!f.builtin ? ' <span class="tag">שלי</span>' : f.edited ? ' <span class="tag">נערך</span>' : ''}</span>
       <span class="row-sub">100 ג׳ · ${macroLine(f)}${u ? ` · ${esc(u[0])} = ${u[1]} ג׳` : ''}</span>
     </span>
-    <span class="row-kcal">${Math.round(f.kcal)}<small>קק״ל</small></span>
+    <span class="row-kcal">${Math.round(f.kcal)}<small>קלוריות</small></span>
   </button>`;
 }
 
@@ -664,7 +664,7 @@ function viewSettings() {
     <h3>יעדים יומיים</h3>
     <p class="lead small">הכנס את היעדים שקיבלת מהמאמן. שינוי כאן חל מהיום והלאה, והימים הקודמים נשארים עם היעד שהיה להם. אפשר גם לשנות יעד מיום מסוים דרך ✎ במסך <b>היום</b>.</p>
     <div class="fields">
-      ${field('kcal', 'קלוריות', 'קק״ל', T.kcal)}
+      ${field('kcal', 'קלוריות', '', T.kcal)}
       ${field('p', 'חלבון', 'גרם', T.p)}
       ${field('c', 'פחמימה', 'גרם', T.c)}
       ${field('f', 'שומן', 'גרם', T.f)}
@@ -743,12 +743,12 @@ function targetHistoryHtml() {
       <div class="row static">
         <span class="row-main">
           <span class="row-name">מ-${short(e.from)}${e.from > today ? ' <span class="tag">עתידי</span>' : ''}</span>
-          <span class="row-sub">${e.kcal} קק״ל · ${macroLine(e)}</span>
+          <span class="row-sub">${e.kcal} קלוריות · ${macroLine(e)}</span>
         </span>
         <button class="icon-btn small" data-act="del-target" data-date="${e.from}" aria-label="מחיקת השינוי">✕</button>
       </div>`).join('')}
       <div class="row static"><span class="row-main"><span class="row-name">יעד התחלתי</span>
-        <span class="row-sub">${state.targets.kcal} קק״ל · ${macroLine(state.targets)}</span></span></div>
+        <span class="row-sub">${state.targets.kcal} קלוריות · ${macroLine(state.targets)}</span></span></div>
     </div>`;
 }
 
@@ -786,7 +786,7 @@ function updateTargetsCheck() {
   const t = readTargetsSheet();
   const fromMacros = Math.round(t.p * 4 + t.c * 4 + t.f * 9);
   const diff = fromMacros - t.kcal;
-  el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קק״ל` +
+  el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קלוריות` +
     (Math.abs(diff) > 50 ? ` (${diff > 0 ? 'יותר' : 'פחות'} מהיעד ב-${Math.abs(diff)})` : ' ✓');
 }
 
@@ -796,7 +796,7 @@ function updateMacroCheck() {
   const T = targetsFor(dateKey());
   const fromMacros = Math.round(T.p * 4 + T.c * 4 + T.f * 9);
   const diff = fromMacros - T.kcal;
-  el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קק״ל` +
+  el.textContent = `חלבון, פחמימה ושומן יחד = ${fromMacros.toLocaleString('he-IL')} קלוריות` +
     (Math.abs(diff) > 50 ? ` (${diff > 0 ? 'יותר' : 'פחות'} מיעד הקלוריות ב-${Math.abs(diff)})` : ' ✓');
 }
 
@@ -973,7 +973,7 @@ function showAmount() {
   openSheet(`
     ${sheetHead(title, back)}
     ${edit ? `<p class="amt-name">${esc(food.name)}</p>` : ''}
-    <p class="lead small">ל-100 גרם: ${Math.round(food.kcal)} קק״ל · ${macroLine(food)}</p>
+    <p class="lead small">ל-100 גרם: ${Math.round(food.kcal)} קלוריות · ${macroLine(food)}</p>
     <div class="chips">${units.map(([n, g]) => `<button class="chip ${n === amt.unit ? 'active' : ''}" data-act="amt-unit" data-unit="${esc(n)}">${esc(n)}${g !== 1 ? ` (${g} ג׳)` : ''}</button>`).join('')}</div>
     <div class="stepper">
       <button class="icon-btn big" data-act="amt-step" data-dir="1" aria-label="יותר">＋</button>
@@ -992,7 +992,7 @@ function renderAmountTotal() {
   const el = document.getElementById('amt-total');
   if (!el) return;
   const it = amountTotals();
-  el.innerHTML = `<b>${it.kcal}</b> קק״ל <span class="muted">(${Math.round(it.grams)} ג׳)</span><div>${macroLine(it)}</div>`;
+  el.innerHTML = `<b>${it.kcal}</b> קלוריות <span class="muted">(${Math.round(it.grams)} ג׳)</span><div>${macroLine(it)}</div>`;
 }
 
 
@@ -1093,9 +1093,9 @@ function aiRow(it, i) {
       <input class="input ai-name" data-ai-name="${i}" value="${esc(it.name)}">
       <div class="ai-sub">
         <label class="ai-grams"><input class="input" data-ai-grams="${i}" inputmode="decimal" value="${it.grams}"><span>גרם</span></label>
-        <span class="ai-kcal" id="ai-kcal-${i}"><b>${s.kcal}</b> קק״ל · ${macroLine(s)}</span>
+        <span class="ai-kcal" id="ai-kcal-${i}"><b>${s.kcal}</b> קלוריות · ${macroLine(s)}</span>
       </div>
-      <div class="ai-per100">ל-100 ג׳: ${Math.round(it.per100.kcal)} קק״ל · ${macroLine({ p: r1(it.per100.p), c: r1(it.per100.c), f: r1(it.per100.f) })}</div>
+      <div class="ai-per100">ל-100 ג׳: ${Math.round(it.per100.kcal)} קלוריות · ${macroLine({ p: r1(it.per100.p), c: r1(it.per100.c), f: r1(it.per100.f) })}</div>
     </div>
   </div>`;
 }
@@ -1104,7 +1104,7 @@ function renderAiTotal() {
   const el = document.getElementById('ai-total');
   if (!el) return;
   const t = sum(ai.items.filter(it => it.on).map(aiScaled));
-  el.innerHTML = `סה״כ <b>${t.kcal}</b> קק״ל<div>${macroLine(t)}</div>`;
+  el.innerHTML = `סה״כ <b>${t.kcal}</b> קלוריות<div>${macroLine(t)}</div>`;
 }
 
 function addAiItems() {
@@ -1258,8 +1258,8 @@ function calc() {
   const c = Math.max(0, Math.round((kcal - p * 4 - f * 9) / 4));
   out.innerHTML = `
     <div class="calc-res">
-      <p>שריפה יומית משוערת: <b>${Math.round(tdee)}</b> קק״ל</p>
-      <p>יעד: <b>${kcal}</b> קק״ל · חלבון ${p} · פחמימה ${c} · שומן ${f}</p>
+      <p>שריפה יומית משוערת: <b>${Math.round(tdee)}</b> קלוריות</p>
+      <p>יעד: <b>${kcal}</b> קלוריות · חלבון ${p} · פחמימה ${c} · שומן ${f}</p>
       <button class="btn primary" data-act="calc-apply" data-v="${[kcal, p, c, f].join(',')}">להשתמש ביעדים האלה</button>
     </div>`;
 }
@@ -1547,7 +1547,7 @@ document.addEventListener('input', e => {
     const i = +t.dataset.aiGrams, it = ai.items[i];
     it.grams = num(t.value);
     const sc = aiScaled(it);
-    document.getElementById(`ai-kcal-${i}`).innerHTML = `<b>${sc.kcal}</b> קק״ל · ${macroLine(sc)}`;
+    document.getElementById(`ai-kcal-${i}`).innerHTML = `<b>${sc.kcal}</b> קלוריות · ${macroLine(sc)}`;
     renderAiTotal();
   }
   else if (t.dataset.target) {
