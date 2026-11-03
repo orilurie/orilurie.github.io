@@ -428,3 +428,15 @@ body.readonly .check { pointer-events: none; }
 .ai-hint summary { color: var(--accent); cursor: pointer; padding: 6px 0; }
 .ai-preview { width: 100%; max-height: 260px; object-fit: cover; border-radius: 12px; display: block; margin-bottom: 12px; }
 .ai-desc .textarea { margin-bottom: 4px; }
+
+/* ---------- camera ---------- */
+.source-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 6px 0 10px; }
+.btn.source { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 10px; font-size: 1rem; }
+.btn.source span { font-size: 2rem; }
+.cam { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 3 / 4; max-height: 62dvh; margin: 0 auto; }
+.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #fff; text-align: center; padding: 20px; font-size: .95rem; }
+.cam-msg[hidden] { display: none; }
+.cam-btns { display: flex; align-items: center; justify-content: space-around; padding: 14px 0 4px; }
+.shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid var(--accent); background: var(--card); box-shadow: inset 0 0 0 4px var(--card), inset 0 0 0 40px var(--accent-soft); }
+.shutter:active { transform: scale(.94); }

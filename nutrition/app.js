@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=7';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=7';
+} from './store.js?v=8';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=8';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
   unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
-} from './cloud.js?v=7';
+} from './cloud.js?v=8';
 
-export const VERSION = 7; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 8; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -408,7 +408,7 @@ function photosHtml() {
   const ps = [...(state.photos || [])].reverse();
   let top = '';
   if (viewing) top = '';
-  else if (currentUser()) top = `<label class="btn wide photo-add">＋ הוספת תמונה<input id="photo-input" type="file" accept="image/*" hidden></label>
+  else if (currentUser()) top = `<button class="btn wide photo-add" data-act="progress-photo">＋ הוספת תמונה</button>
     <p class="lead small">התמונות פרטיות. רק את/ה, ומאמן ששיתפת איתו, יכולים לראות אותן.</p>`;
   else top = '<p class="lead small">תמונות נשמרות בענן, לכן צריך להתחבר לחשבון כדי להוסיף אותן.</p>';
   return `
@@ -807,7 +807,87 @@ let pick = { query: '', cat: 'recent' };
 let amt = null;        // amount editor: { food, unit, qty, edit? }
 let foodEdit = null;   // food editor: { food, thenAmount }
 
+
+// ---------- in-app camera ----------
+// iPhone home-screen apps often show a black screen when the camera is opened through a file input,
+// and never ask for permission. getUserMedia asks for permission explicitly and works there.
+
+let camStream = null;
+let camOnShot = null;   // called with the photo (Blob)
+let camFacing = 'environment';
+let camGallery = null;  // id of the file input to fall back to
+
+function stopCam() {
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null;
+}
+
+// source chooser: camera or gallery
+function showPhotoSource(title, onShot, galleryInputId, facing = 'environment', back = null) {
+  camOnShot = onShot; camGallery = galleryInputId; camFacing = facing;
+  openSheet(`${sheetHead(title, back)}
+    <div class="source-btns">
+      <button class="btn source" data-act="cam-open"><span>📸</span>צילום</button>
+      <button class="btn source" data-act="cam-gallery"><span>🖼️</span>מהגלריה</button>
+    </div>`);
+}
+
+function openCamera() {
+  openSheet(`${sheetHead('צילום')}
+    <div class="cam"><video id="cam-video" playsinline autoplay muted></video><div class="cam-msg" id="cam-msg">פותח מצלמה…</div></div>
+    <div class="cam-btns">
+      <button class="icon-btn big" data-act="cam-flip" aria-label="החלפת מצלמה">🔄</button>
+      <button class="shutter" data-act="cam-shot" aria-label="צילום"></button>
+      <button class="icon-btn big" data-act="cam-gallery" aria-label="מהגלריה">🖼️</button>
+    </div>`);
+  startCam();
+}
+
+let camSeq = 0;   // ignores a slow camera start that was replaced by a newer one (e.g. after flipping)
+async function startCam() {
+  stopCam();
+  const seq = ++camSeq;
+  const msg = document.getElementById('cam-msg');
+  if (!navigator.mediaDevices?.getUserMedia) { camFail('הדפדפן הזה לא תומך בצילום מתוך האפליקציה.'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: camFacing }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false,
+    });
+    const v = document.getElementById('cam-video');
+    if (!v || seq !== camSeq) { stream.getTracks().forEach(t => t.stop()); return; }   // closed or replaced meanwhile
+    camStream = stream;
+    v.srcObject = stream;
+    await v.play().catch(() => {});
+    if (msg) msg.hidden = true;
+  } catch (e) {
+    console.error(e);
+    if (e?.name === 'NotAllowedError') camFail('אין הרשאה למצלמה. באייפון: הגדרות ← אפליקציות ← Safari ← מצלמה ← "שאל" או "אפשר", ואז לסגור ולפתוח את האפליקציה.');
+    else camFail('לא הצלחתי לפתוח את המצלמה.');
+  }
+}
+
+function camFail(text) {
+  const msg = document.getElementById('cam-msg');
+  if (!msg) return;
+  msg.hidden = false;
+  msg.innerHTML = `${esc(text)}<br><button class="btn" data-act="cam-gallery">בחירה מהגלריה</button>`;
+}
+
+async function takeShot() {
+  const v = document.getElementById('cam-video');
+  if (!v) return;
+  // right after opening or flipping, give the camera a moment to deliver a frame
+  for (let i = 0; i < 30 && !(camStream && v.videoWidth && v.readyState >= 2); i++) await new Promise(r => setTimeout(r, 100));
+  if (!camStream || !v.videoWidth) { toast('המצלמה עוד לא מוכנה'); return; }
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  stopCam();
+  c.toBlob(blob => { if (blob && camOnShot) camOnShot(blob); }, 'image/jpeg', 0.9);
+}
+
 function openSheet(html) {
+  stopCam();
   $sheetBody.innerHTML = html;
   $sheet.hidden = false;
   document.body.classList.add('sheet-open');
@@ -815,6 +895,7 @@ function openSheet(html) {
 }
 
 function closeSheet() {
+  stopCam();
   msgPopupOpen = false;
   $sheet.classList.remove('open');
   document.body.classList.remove('sheet-open');
@@ -1288,7 +1369,12 @@ document.addEventListener('click', e => {
     case 'pick-food': { const f = getFood(id); if (f) openAmount(f); break; }
     case 'pick-new': openFoodEditor(null, true); break;
     case 'pick-quick': showQuick(); break;
-    case 'pick-photo': document.getElementById('food-photo-input').click(); break;
+    case 'pick-photo': showPhotoSource('זיהוי מתמונה', blob => startFoodPhoto(blob), 'food-photo-input', 'environment', 'back-picker'); break;
+    case 'cam-open': openCamera(); break;
+    case 'cam-flip': camFacing = camFacing === 'user' ? 'environment' : 'user'; startCam(); break;
+    case 'cam-shot': takeShot(); break;
+    case 'cam-gallery': stopCam(); document.getElementById(camGallery).click(); break;
+    case 'progress-photo': showPhotoSource('תמונת התקדמות', blob => { closeSheet(); addPhoto(blob); }, 'photo-input', 'user'); break;
     case 'ai-toggle': {
       const it = ai.items[+el.dataset.i];
       it.on = !it.on;
@@ -1454,7 +1540,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'food-photo-input' && t.files[0]) { const f = t.files[0]; t.value = ''; startFoodPhoto(f); return; }
-  if (t.id === 'photo-input' && t.files[0]) { addPhoto(t.files[0]); t.value = ''; return; }
+  if (t.id === 'photo-input' && t.files[0]) { closeSheet(); addPhoto(t.files[0]); t.value = ''; return; }
   if (t.id === 'track-water') { state.trackWater = t.checked; save(); render(); return; }
   if (t.dataset.mealName) {
     const m = state.meals.find(x => x.id === t.dataset.mealName);
