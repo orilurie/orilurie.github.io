@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=6';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=6';
+} from './store.js?v=7';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=7';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
   unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
-} from './cloud.js?v=6';
+} from './cloud.js?v=7';
 
-export const VERSION = 6; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 7; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -924,19 +924,34 @@ function blobToBase64(blob) {
   });
 }
 
+// Step 1: show the photo with an optional description, so the AI gets the user's amounts up front.
 async function startFoodPhoto(file) {
-  const ctx = sheetCtx;
-  openSheet(`${sheetHead('מזהה את האוכל…')}
-    <div class="ai-wait"><div class="spinner"></div><p class="lead">זה לוקח כמה שניות 🍽️</p></div>`);
-  sheetCtx = ctx;
   try {
     const image = await blobToBase64(await compressImage(file, 1024));
-    ai = { image, items: [], note: '' };
-    await runFoodPhoto('');
+    ai = { image, items: [], note: '', hint: '' };
+    showAiCompose();
   } catch (e) {
     console.error(e);
-    showAiError();
+    showAiError('לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת.');
   }
+}
+
+function showAiCompose() {
+  openSheet(`
+    ${sheetHead('זיהוי מתמונה', 'back-picker')}
+    <img class="ai-preview" src="data:image/jpeg;base64,${ai.image}" alt="התמונה שנבחרה">
+    <label class="field full ai-desc"><span>מה יש בצלחת ובאיזו כמות? <small class="muted">(לא חובה, אבל משפר מאוד את הדיוק)</small></span>
+      <textarea id="ai-desc" class="input textarea" rows="3" maxlength="300" placeholder="למשל: 2 ביצים, פרוסת לחם מלא, חצי אבוקדו, סלט עם כף שמן זית">${esc(ai.hint)}</textarea>
+    </label>
+    <button class="btn primary wide" data-act="ai-go">🔍 זיהוי</button>
+    <button class="btn ghost wide" data-act="pick-photo">תמונה אחרת</button>`);
+}
+
+function analyzeWith(hint) {
+  ai.hint = hint;
+  openSheet(`${sheetHead('מזהה את האוכל…')}
+    <div class="ai-wait"><div class="spinner"></div><p class="lead">זה לוקח כמה שניות 🍽️</p></div>`);
+  runFoodPhoto(hint).catch(e => { console.error(e); showAiError(); });
 }
 
 async function runFoodPhoto(hint) {
@@ -949,7 +964,8 @@ async function runFoodPhoto(hint) {
 function showAiError(msg) {
   openSheet(`${sheetHead('לא הצלחתי לזהות', 'back-picker')}
     <p class="lead">${esc(msg || 'השירות עמוס כרגע או שאין חיבור. נסו שוב בעוד דקה, או הוסיפו ידנית.')}</p>
-    <button class="btn primary wide" data-act="pick-photo">לנסות שוב</button>`);
+    ${ai?.image ? '<button class="btn primary wide" data-act="ai-again">לנסות שוב</button>' : ''}
+    <button class="btn ${ai?.image ? 'ghost' : 'primary'} wide" data-act="pick-photo">תמונה אחרת</button>`);
 }
 
 function aiScaled(it) {
@@ -967,7 +983,7 @@ function showAiResult() {
     ${ai.note ? `<p class="lead small">💡 ${esc(ai.note)}</p>` : ''}
     <details class="ai-hint">
       <summary>לא מדויק? ספרו מה יש בצלחת ונסו שוב</summary>
-      <textarea id="ai-hint" class="input textarea" rows="2" maxlength="300" placeholder="למשל: 150 גרם חזה עוף, כוס אורז, סלט עם כף שמן זית"></textarea>
+      <textarea id="ai-hint" class="input textarea" rows="2" maxlength="300" placeholder="למשל: 150 גרם חזה עוף, כוס אורז, סלט עם כף שמן זית">${esc(ai.hint || '')}</textarea>
       <button class="btn wide" data-act="ai-retry">זיהוי מחדש</button>
     </details>
     ${ai.items.length ? `<button class="btn primary wide" data-act="ai-add">הוספה ל${esc(where)}</button>` : ''}`);
@@ -1281,13 +1297,10 @@ document.addEventListener('click', e => {
       el.textContent = it.on ? '✓' : '';
       renderAiTotal(); break;
     }
-    case 'ai-retry': {
-      const hint = document.getElementById('ai-hint').value.trim();
-      openSheet(`${sheetHead('מזהה שוב…')}<div class="ai-wait"><div class="spinner"></div></div>`);
-      runFoodPhoto(hint).catch(e => { console.error(e); showAiError(); });
-      break;
-    }
+    case 'ai-go': analyzeWith(document.getElementById('ai-desc').value.trim()); break;
+    case 'ai-retry': analyzeWith(document.getElementById('ai-hint').value.trim()); break;
     case 'ai-add': addAiItems(); break;
+    case 'ai-again': showAiCompose(); break;
     case 'back-picker': amt = null; foodEdit = null; showPicker(); break;
     case 'quick-save': {
       const v = k => document.getElementById(k).value;
