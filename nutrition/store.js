@@ -229,3 +229,36 @@ export function nextTargetChange(key) {
 }
 
 export const trackWater = () => state.trackWater === true;
+
+// Renders someone else's data with the same view code: swaps the state for the duration of fn.
+export function withState(other, fn) {
+  const mine = state;
+  state = other;
+  try { return fn(); } finally { state = mine; }
+}
+
+// ---------- body measurements & progress photos ----------
+
+export const MEASURES = [
+  ['waist', 'מותן'],
+  ['belly', 'בטן (בגובה הטבור)'],
+  ['hips', 'ירכיים / אגן'],
+  ['chest', 'חזה'],
+  ['arm', 'זרוע'],
+  ['thigh', 'ירך'],
+];
+
+export function setMeasurement(date, vals) {
+  const list = (state.measurements || []).filter(m => m.date !== date);
+  const entry = { date };
+  for (const [k] of MEASURES) if (vals[k] > 0) entry[k] = r1(vals[k]);
+  if (Object.keys(entry).length > 1) list.push(entry);
+  list.sort((a, b) => a.date.localeCompare(b.date));
+  state.measurements = list;
+  save();
+}
+
+export function deleteMeasurement(date) {
+  state.measurements = (state.measurements || []).filter(m => m.date !== date);
+  save();
+}

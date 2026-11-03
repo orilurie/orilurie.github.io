@@ -229,3 +229,97 @@ export async function signOut() {
   stopSync();
   await sb.auth.signOut();
 }
+
+// ---------- sharing with a coach (read-only) and messages ----------
+
+export async function listShares() {
+  if (!user) return { viewers: [], athletes: [] };
+  const { data, error } = await sb.from('nutrition_shares').select('*').order('created_at');
+  if (error) throw error;
+  return {
+    viewers: data.filter(r => r.owner_id === user.id),
+    athletes: data.filter(r => r.viewer_id === user.id),
+  };
+}
+
+// Returns null on success, or an error code: 'no_user' | 'self' | ...
+export async function addShare(email) {
+  const { data, error } = await sb.rpc('nutrition_share_add', { viewer_email: email });
+  if (error) throw error;
+  return data?.error || null;
+}
+
+export async function removeShare(ownerId, viewerId) {
+  const { error } = await sb.from('nutrition_shares').delete().eq('owner_id', ownerId).eq('viewer_id', viewerId);
+  if (error) throw error;
+}
+
+// Someone else's data, read-only (allowed by the share).
+export async function fetchUserData(ownerId) {
+  const [m, d] = await Promise.all([
+    sb.from('nutrition_state').select('data').eq('user_id', ownerId).maybeSingle(),
+    sb.from('nutrition_days').select('day, data').eq('user_id', ownerId),
+  ]);
+  if (m.error) throw m.error;
+  if (d.error) throw d.error;
+  const days = {};
+  for (const r of d.data || []) days[r.day] = r.data;
+  return { ...(m.data?.data || {}), days };
+}
+
+export async function sendMessage(ownerId, body) {
+  const { error } = await sb.from('nutrition_messages').insert({ owner_id: ownerId, body: body.trim() });
+  if (error) throw error;
+}
+
+export async function listMessages(ownerId) {
+  const { data, error } = await sb.from('nutrition_messages').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteMessage(id) {
+  const { error } = await sb.from('nutrition_messages').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function unreadMessages() {
+  if (!user) return [];
+  const { data, error } = await sb.from('nutrition_messages').select('*').eq('owner_id', user.id).is('read_at', null).order('created_at');
+  if (error) throw error;
+  return data;
+}
+
+export async function markRead(ids) {
+  if (!ids.length) return;
+  const { error } = await sb.from('nutrition_messages').update({ read_at: new Date().toISOString() }).in('id', ids);
+  if (error) throw error;
+}
+
+// ---------- progress photos ----------
+
+const BUCKET = 'nutrition-photos';
+const urlCache = new Map();
+
+export async function uploadPhoto(blob) {
+  const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
+  if (error) throw error;
+  return path;
+}
+
+export async function photoUrls(paths) {
+  const need = paths.filter(p => !urlCache.has(p));
+  if (need.length) {
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrls(need, 60 * 60 * 6);
+    if (error) throw error;
+    for (const r of data || []) if (r.signedUrl) urlCache.set(r.path, r.signedUrl);
+  }
+  return Object.fromEntries(paths.map(p => [p, urlCache.get(p) || '']));
+}
+
+export async function deletePhoto(path) {
+  const { error } = await sb.storage.from(BUCKET).remove([path]);
+  if (error) throw error;
+  urlCache.delete(path);
+}

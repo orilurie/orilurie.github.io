@@ -4,14 +4,17 @@ import {
   makeItem, quickItem, reamount, amountLabel, sum,
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
-} from './store.js?v=4';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=4';
+  withState, MEASURES, setMeasurement, deleteMeasurement,
+} from './store.js?v=5';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=5';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
-} from './cloud.js?v=4';
+  listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
+  unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto,
+} from './cloud.js?v=5';
 
-export const VERSION = 4; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 5; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -89,11 +92,18 @@ function render() {
   $tabs.hidden = screen !== 'app';
   if (screen === 'loading') { $view.innerHTML = '<div class="splash"><div class="spinner"></div></div>'; return; }
   if (screen === 'login') { $view.innerHTML = viewLogin(); return; }
+  document.body.classList.toggle('readonly', !!viewing);
+  if (viewing && !VIEWER_TABS.includes(tab)) tab = 'today';
   for (const b of $tabs.querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === tab);
   const views = { today: viewToday, plan: viewPlan, foods: viewFoods, weight: viewWeight, settings: viewSettings };
-  $view.innerHTML = views[tab]();
+  if (viewing) {
+    $view.innerHTML = viewerBanner() + withState(viewing.data, () => views[tab]());
+  } else {
+    $view.innerHTML = (tab === 'today' ? athletesChip() : '') + views[tab]();
+  }
   if (tab === 'foods') renderFoodsList();
-  if (tab === 'settings') updateMacroCheck();
+  if (tab === 'settings') { updateMacroCheck(); loadShareBox(); }
+  if (tab === 'weight') loadPhotoThumbs();
 }
 
 function ring(eaten, target) {
@@ -324,14 +334,14 @@ function weightChart(ws) {
 }
 
 function viewWeight() {
-  const ws = state.weights;
+  const ws = state.weights || [];
   const last = ws[ws.length - 1];
   const first = ws[0];
   const weekAgo = shiftKey(dateKey(), -7);
   const ref = [...ws].reverse().find(w => w.date <= weekAgo);
-  const delta = (a, b) => { const d = r1(a - b); return `${d > 0 ? '+' : ''}${fmt(d)}`; };
   return `
-  <h2 class="page-title">מעקב משקל</h2>
+  <h2 class="page-title">מדדים</h2>
+  <h3 class="section-h">⚖️ משקל</h3>
   <section class="card weight-form">
     <label>תאריך<input id="w-date" class="input" type="date" value="${dateKey()}" max="${dateKey()}"></label>
     <label>משקל (ק״ג)<input id="w-kg" class="input" type="text" inputmode="decimal" placeholder="${last ? fmt(last.kg) : '75.0'}"></label>
@@ -340,15 +350,261 @@ function viewWeight() {
   ${last ? `
   <section class="card stats">
     <div><small>נוכחי</small><b>${fmt(last.kg)}</b></div>
-    <div><small>מההתחלה</small><b>${delta(last.kg, first.kg)}</b></div>
-    <div><small>בשבוע האחרון</small><b>${ref ? delta(last.kg, ref.kg) : '—'}</b></div>
-  </section>` : '<p class="empty">עוד אין שקילות. כדאי להישקל בבוקר, אחרי שירותים ולפני אוכל.</p>'}
+    <div><small>מההתחלה</small><b>${signed(last.kg - first.kg)}</b></div>
+    <div><small>בשבוע האחרון</small><b>${ref ? signed(last.kg - ref.kg) : '—'}</b></div>
+  </section>` : '<p class="empty">עוד אין שקילות.</p>'}
   ${weightChart(ws)}
-  ${ws.length ? `<section class="card list">${[...ws].reverse().map(w => `
+  ${ws.length ? `<details class="card more"><summary>כל השקילות (${ws.length})</summary><div class="list">${[...ws].reverse().map(w => `
     <div class="row static">
       <span class="row-main"><span class="row-name">${fmt(w.kg)} ק״ג</span><span class="row-sub">${dayTitle(w.date)} · ${w.date.split('-').reverse().join('.')}</span></span>
       <button class="icon-btn small" data-act="del-weight" data-date="${w.date}" aria-label="מחיקה">✕</button>
-    </div>`).join('')}</section>` : ''}`;
+    </div>`).join('')}</div></details>` : ''}
+
+  <h3 class="section-h">📏 היקפים</h3>
+  ${measuresHtml()}
+
+  <h3 class="section-h">📸 תמונות התקדמות</h3>
+  ${photosHtml()}`;
+}
+
+const signed = d => { d = r1(d); return `<span dir="ltr">${d > 0 ? '+' : ''}${fmt(d)}</span>`; };
+const shortDate = k => { const [y, m, d] = k.split('-'); return `${+d}.${+m}.${y.slice(2)}`; };
+
+function measuresHtml() {
+  const ms = state.measurements || [];
+  const latest = {}, firstOf = {};
+  for (const m of ms) for (const [k] of MEASURES) if (m[k]) { if (!(k in firstOf)) firstOf[k] = m[k]; latest[k] = m[k]; }
+  const lastM = ms[ms.length - 1];
+  const form = `
+  <details class="card measure-form">
+    <summary>＋ הוספת מדידה</summary>
+    <p class="lead small">בסנטימטרים. אפשר למלא רק חלק. כדאי למדוד באותו מקום ובאותה שעה בכל פעם.</p>
+    <label class="field full"><span>תאריך</span><input id="m-date" class="input" type="date" value="${dateKey()}" max="${dateKey()}"></label>
+    <div class="fields">${MEASURES.map(([k, l]) => `
+      <label class="field"><span>${l}</span><input class="input" data-measure="${k}" inputmode="decimal" placeholder="${latest[k] ? fmt(latest[k]) : ''}"></label>`).join('')}
+    </div>
+    <button class="btn primary wide" data-act="save-measure">שמירה</button>
+  </details>`;
+  if (!ms.length) return form + '<p class="empty">עוד אין מדידות.</p>';
+  const cls = k => latest[k] < firstOf[k] ? 'down' : latest[k] > firstOf[k] ? 'up' : '';
+  return form + `
+  <section class="card">
+    <div class="m-table">
+      <div class="m-row m-head"><span></span><span>נוכחי</span><span>מההתחלה</span></div>
+      ${MEASURES.filter(([k]) => latest[k]).map(([k, l]) => `
+      <div class="m-row"><span>${l}</span><b>${fmt(latest[k])}</b><span class="${cls(k)}">${latest[k] === firstOf[k] ? '—' : signed(latest[k] - firstOf[k])}</span></div>`).join('')}
+    </div>
+    <p class="lead small">מדידה אחרונה: ${shortDate(lastM.date)} · בס״מ</p>
+  </section>
+  <details class="card more"><summary>כל המדידות (${ms.length})</summary><div class="list">${[...ms].reverse().map(m => `
+    <div class="row static">
+      <span class="row-main"><span class="row-name">${shortDate(m.date)}</span>
+        <span class="row-sub">${MEASURES.filter(([k]) => m[k]).map(([k, l]) => `${l.split(' ')[0]} ${fmt(m[k])}`).join(' · ')}</span></span>
+      <button class="icon-btn small" data-act="del-measure" data-date="${m.date}" aria-label="מחיקה">✕</button>
+    </div>`).join('')}</div></details>`;
+}
+
+function photosHtml() {
+  const ps = [...(state.photos || [])].reverse();
+  let top = '';
+  if (viewing) top = '';
+  else if (currentUser()) top = `<label class="btn wide photo-add">＋ הוספת תמונה<input id="photo-input" type="file" accept="image/*" hidden></label>
+    <p class="lead small">התמונות פרטיות. רק את/ה, ומאמן ששיתפת איתו, יכולים לראות אותן.</p>`;
+  else top = '<p class="lead small">תמונות נשמרות בענן, לכן צריך להתחבר לחשבון כדי להוסיף אותן.</p>';
+  return `
+  <section class="card">
+    ${top}
+    ${ps.length ? `<div class="photo-grid">${ps.map(p => `
+      <button class="photo" data-act="photo-open" data-path="${esc(p.path)}" data-date="${p.date}">
+        <img data-photo="${esc(p.path)}" alt="תמונה מ-${shortDate(p.date)}"><span>${shortDate(p.date)}</span>
+      </button>`).join('')}</div>` : '<p class="empty">עוד אין תמונות.</p>'}
+  </section>`;
+}
+
+async function loadPhotoThumbs() {
+  const imgs = [...document.querySelectorAll('img[data-photo]')];
+  if (!imgs.length) return;
+  try {
+    const urls = await photoUrls(imgs.map(i => i.dataset.photo));
+    for (const i of imgs) if (urls[i.dataset.photo]) i.src = urls[i.dataset.photo];
+  } catch (e) { console.error(e); }
+}
+
+// Shrinks a photo to at most 1280px so it uploads fast and stays small.
+async function compressImage(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.82));
+}
+
+async function addPhoto(file) {
+  toast('מעלה תמונה…');
+  try {
+    const blob = await compressImage(file);
+    const path = await uploadPhoto(blob);
+    state.photos = [...(state.photos || []), { date: dateKey(), path }];
+    save(); render(); toast('התמונה נשמרה');
+  } catch (e) { console.error(e); toast('ההעלאה נכשלה. נסו שוב'); }
+}
+
+async function openPhoto(path, date) {
+  openSheet(`${sheetHead(shortDate(date))}<img class="photo-big" alt="">
+    ${viewing ? '' : `<div class="btn-row"><button class="btn danger" data-act="photo-del" data-path="${esc(path)}">מחיקת התמונה</button></div>`}`);
+  const urls = await photoUrls([path]).catch(() => ({}));
+  const img = $sheetBody.querySelector('.photo-big');
+  if (img && urls[path]) img.src = urls[path];
+}
+
+// ---------- sharing with a coach ----------
+
+const VIEWER_TABS = ['today', 'plan', 'weight'];
+let viewing = null;      // { ownerId, email, data } while a coach looks at someone's data
+let shares = { viewers: [], athletes: [] };
+const nameOf = email => (email || '').split('@')[0];
+
+async function refreshShares() {
+  if (!currentUser()) { shares = { viewers: [], athletes: [] }; return; }
+  try { shares = await listShares(); } catch (e) { console.error(e); }
+}
+
+function athletesChip() {
+  const n = shares.athletes.length;
+  if (!n) return '';
+  return `<button class="athletes-chip" data-act="athletes">👥 ${n === 1 ? `צפייה ב-<span dir="ltr">${esc(nameOf(shares.athletes[0].owner_email))}</span>` : `צפייה במתאמנים (${n})`}</button>`;
+}
+
+function viewerBanner() {
+  return `
+  <div class="viewer-banner">
+    <span class="vb-who">👀 צופה ב-<b dir="ltr">${esc(nameOf(viewing.email))}</b><small>צפייה בלבד</small></span>
+    <span class="vb-btns">
+      <button class="btn small-btn" data-act="coach-msg">💬 הודעה</button>
+      <button class="btn small-btn" data-act="coach-exit">יציאה</button>
+    </span>
+  </div>`;
+}
+
+async function startViewing(row) {
+  closeSheet();
+  toast('טוען…');
+  try {
+    const data = await fetchUserData(row.owner_id);
+    // missing fields fall back to defaults so the views don't break
+    data.targets ||= { kcal: 2000, p: 150, c: 200, f: 65 };
+    data.meals ||= state.meals;
+    data.plan ||= {};
+    data.weights ||= [];
+    viewing = { ownerId: row.owner_id, email: row.owner_email, data };
+    tab = 'today'; curDay = dateKey();
+    render(); window.scrollTo(0, 0);
+  } catch (e) { console.error(e); toast('לא הצלחתי לטעון את הנתונים'); }
+}
+
+function showAthletes() {
+  openSheet(`${sheetHead('מתאמנים ששיתפו איתך')}
+    <div class="list">${shares.athletes.map(a => `
+      <button class="row" data-act="view-athlete" data-owner="${a.owner_id}">
+        <span class="row-main"><span class="row-name" dir="ltr">${esc(a.owner_email)}</span><span class="row-sub">צפייה בתזונה, בתפריט ובמדדים</span></span>
+        <span class="row-kcal">←</span>
+      </button>`).join('')}</div>`);
+}
+
+async function showCoachMessages() {
+  openSheet(`${sheetHead(`הודעה ל-${nameOf(viewing.email)}`)}
+    <p class="lead small">ההודעה תקפוץ בפעם הבאה שייכנסו לאפליקציה.</p>
+    <textarea id="msg-body" class="input textarea" rows="4" maxlength="2000" placeholder="למשל: מעולה, תמשיכו ככה! 💪"></textarea>
+    <button class="btn primary wide" data-act="coach-send">שליחה</button>
+    <h4>הודעות קודמות</h4>
+    <div class="list" id="msg-list"><p class="empty">טוען…</p></div>`);
+  try {
+    const msgs = await listMessages(viewing.ownerId);
+    const el = document.getElementById('msg-list');
+    if (el) el.innerHTML = msgs.length ? msgs.map(m => messageRow(m, m.author_id === currentUser()?.id)).join('') : '<p class="empty">עוד לא נשלחו הודעות</p>';
+  } catch (e) { console.error(e); }
+}
+
+function msgTime(iso) {
+  const d = new Date(iso);
+  return `${d.getDate()}.${d.getMonth() + 1} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function messageRow(m, mine) {
+  return `<div class="msg">
+    <div class="msg-head"><span dir="ltr">${esc(nameOf(m.author_email))}</span><span>${msgTime(m.created_at)}${mine ? (m.read_at ? ' · נקרא ✓✓' : ' · עוד לא נקרא') : ''}</span></div>
+    <div class="msg-body">${esc(m.body)}</div>
+    ${mine ? `<button class="btn ghost small-btn" data-act="coach-del-msg" data-id="${m.id}">מחיקה</button>` : ''}
+  </div>`;
+}
+
+function shareCard() {
+  if (!cloudEnabled) return '';
+  if (!currentUser()) return `
+  <section class="card"><h3>שיתוף עם מאמן</h3>
+    <p class="lead small">כדי לשתף צריך להתחבר לחשבון.</p></section>`;
+  return `<section class="card" id="share-box"><h3>שיתוף עם מאמן</h3><p class="empty">טוען…</p></section>`;
+}
+
+async function loadShareBox() {
+  if (!document.getElementById('share-box')) return;
+  await refreshShares();
+  const el = document.getElementById('share-box');
+  if (!el) return;
+  el.innerHTML = `
+    <h3>שיתוף עם מאמן</h3>
+    <p class="lead small">המאמן יוכל לראות מה אכלת, את התפריט, המשקל, ההיקפים והתמונות, ולשלוח לך הודעות. הוא לא יוכל לשנות שום דבר. הוא צריך להירשם לאפליקציה לפני השיתוף.</p>
+    <div class="share-add">
+      <input id="share-email" class="input" type="email" dir="ltr" placeholder="המייל של המאמן" autocomplete="off">
+      <button class="btn primary" data-act="share-add">שיתוף</button>
+    </div>
+    ${shares.viewers.length ? `<div class="list">${shares.viewers.map(v => `
+      <div class="row static">
+        <span class="row-main"><span class="row-name" dir="ltr">${esc(v.viewer_email)}</span><span class="row-sub">יכול לצפות</span></span>
+        <button class="icon-btn small" data-act="share-remove" data-owner="${v.owner_id}" data-viewer="${v.viewer_id}" aria-label="הפסקת שיתוף">✕</button>
+      </div>`).join('')}</div>` : ''}
+    <button class="btn ghost" data-act="my-messages">💬 הודעות שקיבלתי</button>
+    ${shares.athletes.length ? `
+    <h4 class="sub-h">מתאמנים ששיתפו איתך</h4>
+    <div class="list">${shares.athletes.map(a => `
+      <div class="row static">
+        <button class="row-main" data-act="view-athlete" data-owner="${a.owner_id}"><span class="row-name" dir="ltr">${esc(a.owner_email)}</span><span class="row-sub">לחצו לצפייה</span></button>
+        <button class="icon-btn small" data-act="share-remove" data-owner="${a.owner_id}" data-viewer="${a.viewer_id}" aria-label="הפסקת מעקב">✕</button>
+      </div>`).join('')}</div>` : ''}`;
+}
+
+const SHARE_ERRORS = {
+  no_user: 'אין משתמש עם המייל הזה. המאמן צריך להירשם לאפליקציה קודם',
+  self: 'זה המייל שלך 🙂',
+};
+
+async function showMyMessages() {
+  openSheet(`${sheetHead('הודעות שקיבלתי')}<div class="list" id="my-msgs"><p class="empty">טוען…</p></div>`);
+  try {
+    const msgs = await listMessages(currentUser().id);
+    const el = document.getElementById('my-msgs');
+    if (el) el.innerHTML = msgs.length ? msgs.map(m => messageRow(m, false)).join('') : '<p class="empty">אין הודעות</p>';
+  } catch (e) { console.error(e); }
+}
+
+// New messages pop up when the app opens (and when it comes back to the foreground),
+// until "read" is tapped.
+let msgPopupOpen = false;
+async function checkMessages() {
+  if (!currentUser() || viewing || msgPopupOpen || screen !== 'app') return;
+  let msgs = [];
+  try { msgs = await unreadMessages(); } catch (e) { console.error(e); return; }
+  if (!msgs.length || $sheet.classList.contains('open') || viewing) return;
+  openSheet(`
+    <div class="msg-pop">
+      <div class="msg-pop-icon">💬</div>
+      <h3>${msgs.length === 1 ? 'הודעה חדשה מהמאמן' : `${msgs.length} הודעות חדשות מהמאמן`}</h3>
+      ${msgs.map(m => messageRow(m, false)).join('')}
+      <button class="btn primary wide" data-act="msgs-read" data-ids="${msgs.map(m => m.id).join(',')}">קראתי 👍</button>
+    </div>`);
+  msgPopupOpen = true;
 }
 
 function viewLogin() {
@@ -402,6 +658,7 @@ function viewSettings() {
   return `
   <h2 class="page-title">הגדרות</h2>
   ${accountCard()}
+  ${shareCard()}
 
   <section class="card">
     <h3>יעדים יומיים</h3>
@@ -558,6 +815,7 @@ function openSheet(html) {
 }
 
 function closeSheet() {
+  msgPopupOpen = false;
   $sheet.classList.remove('open');
   document.body.classList.remove('sheet-open');
   setTimeout(() => { if (!$sheet.classList.contains('open')) { $sheet.hidden = true; $sheetBody.innerHTML = ''; } }, 200);
@@ -797,8 +1055,66 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id, meal } = el.dataset;
+  if (viewing && !VIEWER_ACTS.has(act)) return;   // read-only while looking at someone else's data
 
   switch (act) {
+    // measurements & photos
+    case 'save-measure': {
+      const vals = {};
+      for (const i of document.querySelectorAll('[data-measure]')) vals[i.dataset.measure] = num(i.value);
+      if (!Object.values(vals).some(v => v > 0)) { toast('צריך למלא לפחות מדידה אחת'); break; }
+      setMeasurement(document.getElementById('m-date').value || dateKey(), vals);
+      render(); toast('נשמר'); break;
+    }
+    case 'del-measure':
+      if (confirm('למחוק את המדידה?')) { deleteMeasurement(el.dataset.date); render(); }
+      break;
+    case 'photo-open': openPhoto(el.dataset.path, el.dataset.date); break;
+    case 'photo-del': {
+      if (!confirm('למחוק את התמונה?')) break;
+      const path = el.dataset.path;
+      deletePhoto(path).catch(console.error);
+      state.photos = (state.photos || []).filter(p => p.path !== path);
+      save(); closeSheet(); render(); break;
+    }
+
+    // sharing
+    case 'athletes': showAthletes(); break;
+    case 'view-athlete': { const row = shares.athletes.find(a => a.owner_id === el.dataset.owner); if (row) startViewing(row); break; }
+    case 'coach-exit': viewing = null; closeSheet(); tab = 'today'; curDay = dateKey(); render(); window.scrollTo(0, 0); break;
+    case 'coach-msg': showCoachMessages(); break;
+    case 'coach-send': {
+      const body = document.getElementById('msg-body').value.trim();
+      if (!body) { toast('צריך לכתוב משהו'); break; }
+      el.disabled = true;
+      sendMessage(viewing.ownerId, body).then(() => { toast('ההודעה נשלחה ✓'); showCoachMessages(); })
+        .catch(e => { console.error(e); el.disabled = false; toast('השליחה נכשלה'); });
+      break;
+    }
+    case 'coach-del-msg':
+      if (confirm('למחוק את ההודעה?')) deleteMessage(id).then(showCoachMessages).catch(console.error);
+      break;
+    case 'share-add': {
+      const email = document.getElementById('share-email').value.trim();
+      if (!email) { toast('צריך מייל'); break; }
+      el.disabled = true;
+      addShare(email).then(err => {
+        if (err) { toast(SHARE_ERRORS[err] || 'השיתוף נכשל'); el.disabled = false; return; }
+        toast('שותף ✓'); loadShareBox();
+      }).catch(e => { console.error(e); toast('השיתוף נכשל'); el.disabled = false; });
+      break;
+    }
+    case 'share-remove': {
+      const mine = el.dataset.owner === currentUser()?.id;
+      if (!confirm(mine ? 'להפסיק את השיתוף? הוא לא יוכל לראות יותר את הנתונים שלך.' : 'להפסיק לעקוב אחרי המתאמן הזה?')) break;
+      removeShare(el.dataset.owner, el.dataset.viewer).then(loadShareBox).catch(e => { console.error(e); toast('לא הצליח'); });
+      break;
+    }
+    case 'my-messages': showMyMessages(); break;
+    case 'msgs-read':
+      markRead(el.dataset.ids.split(',')).catch(console.error);
+      closeSheet(); break;
+
     // navigation
     case 'tab': tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
     case 'day': curDay = shiftKey(curDay, +el.dataset.delta); render(); break;
@@ -998,6 +1314,7 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'photo-input' && t.files[0]) { addPhoto(t.files[0]); t.value = ''; return; }
   if (t.id === 'track-water') { state.trackWater = t.checked; save(); render(); return; }
   if (t.dataset.mealName) {
     const m = state.meals.find(x => x.id === t.dataset.mealName);
@@ -1030,6 +1347,7 @@ document.addEventListener('visibilitychange', () => {
   const now = dateKey();
   if (now !== lastToday) { if (curDay === lastToday) curDay = now; lastToday = now; render(); }
   refresh();
+  checkMessages();
 });
 
 function keepEmail() {
@@ -1042,6 +1360,8 @@ function runAuth(fn) {
   auth.busy = true; auth.msg = ''; auth.ok = false; render();
   fn().catch(e => { console.error(e); auth.busy = false; auth.msg = authError(e); render(); });
 }
+
+const VIEWER_ACTS = new Set(['tab', 'day', 'today', 'close', 'photo-open', 'coach-exit', 'coach-msg', 'coach-send', 'coach-del-msg']);
 
 // ---------- start ----------
 
@@ -1060,6 +1380,8 @@ initCloud({
     else if (cloudEnabled && !isLocalOnly() && !err) screen = 'login';
     else screen = 'app';
     if (err) toast('אין חיבור לענן כרגע');
+    viewing = null;
     render();
+    if (u) refreshShares().then(() => { if (tab === 'today' && !viewing) render(); checkMessages(); });
   },
 });
