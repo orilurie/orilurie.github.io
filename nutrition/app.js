@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=8';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=8';
+} from './store.js?v=9';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=9';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
   unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
-} from './cloud.js?v=8';
+} from './cloud.js?v=9';
 
-export const VERSION = 8; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 9; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -930,7 +930,7 @@ function showPicker() {
     <div class="chips" id="pick-chips">${catChips(pick.cat, true, 'pick-cat')}</div>
     <div class="list sheet-list" id="pick-list"></div>
     <div class="btn-row sheet-foot">
-      ${currentUser() ? '<button class="btn" data-act="pick-photo">📷 מתמונה</button>' : ''}
+      ${currentUser() ? '<button class="btn" data-act="pick-photo">📷 תמונה</button><button class="btn" data-act="pick-text">✍️ תיאור</button>' : ''}
       <button class="btn" data-act="pick-new">＋ מזון חדש</button>
       ${sheetCtx.kind === 'log' ? '<button class="btn" data-act="pick-quick">הוספה מהירה</button>' : ''}
     </div>`);
@@ -941,8 +941,12 @@ function renderPickList() {
   const el = document.getElementById('pick-list');
   if (!el) return;
   const list = filterFoods(pick.query, pick.cat);
-  el.innerHTML = list.length ? list.map(f => foodRow(f, 'pick-food')).join('')
-    : `<p class="empty">${pick.query ? 'לא נמצא. אפשר להוסיף אותו כמזון חדש 👇' : 'אין כאן עדיין מזונות'}</p>`;
+  // Anything typed in the search can also be estimated by the AI ("משולש פיצה").
+  const aiRow = pick.query.trim() && currentUser()
+    ? `<button class="row ai-search" data-act="pick-ai-query"><span class="row-main"><span class="row-name">✨ לחשב "${esc(pick.query.trim())}"</span><span class="row-sub">הערכת קלוריות ומאקרו בעזרת AI</span></span></button>`
+    : '';
+  el.innerHTML = list.length ? list.map(f => foodRow(f, 'pick-food')).join('') + aiRow
+    : aiRow + `<p class="empty">${pick.query ? 'לא נמצא במאגר. אפשר לחשב עם AI 👆 או להוסיף כמזון חדש 👇' : 'אין כאן עדיין מזונות'}</p>`;
 }
 
 function itemAsFood(it) {
@@ -1018,14 +1022,20 @@ async function startFoodPhoto(file) {
 }
 
 function showAiCompose() {
+  const photo = !!ai.image;
   openSheet(`
-    ${sheetHead('זיהוי מתמונה', 'back-picker')}
-    <img class="ai-preview" src="data:image/jpeg;base64,${ai.image}" alt="התמונה שנבחרה">
-    <label class="field full ai-desc"><span>מה יש בצלחת ובאיזו כמות? <small class="muted">(לא חובה, אבל משפר מאוד את הדיוק)</small></span>
-      <textarea id="ai-desc" class="input textarea" rows="3" maxlength="300" placeholder="למשל: 2 ביצים, פרוסת לחם מלא, חצי אבוקדו, סלט עם כף שמן זית">${esc(ai.hint)}</textarea>
+    ${sheetHead(photo ? 'זיהוי מתמונה' : 'מה אכלת?', 'back-picker')}
+    ${photo ? `<img class="ai-preview" src="data:image/jpeg;base64,${ai.image}" alt="התמונה שנבחרה">` : ''}
+    <label class="field full ai-desc"><span>${photo
+      ? 'מה יש בצלחת ובאיזו כמות? <small class="muted">(לא חובה, אבל משפר מאוד את הדיוק)</small>'
+      : 'כתבו במילים מה אכלתם, עם כמויות אם אפשר'}</span>
+      <textarea id="ai-desc" class="input textarea" rows="3" maxlength="300" placeholder="${photo
+        ? 'למשל: 2 ביצים, פרוסת לחם מלא, חצי אבוקדו, סלט עם כף שמן זית'
+        : 'למשל: משולש פיצה, או: שניצל בפיתה עם חומוס וצ׳יפס'}">${esc(ai.hint)}</textarea>
     </label>
-    <button class="btn primary wide" data-act="ai-go">🔍 זיהוי</button>
-    <button class="btn ghost wide" data-act="pick-photo">תמונה אחרת</button>`);
+    <button class="btn primary wide" data-act="ai-go">${photo ? '🔍 זיהוי' : '✨ חישוב'}</button>
+    ${photo ? '<button class="btn ghost wide" data-act="pick-photo">תמונה אחרת</button>' : ''}`);
+  if (!photo) setTimeout(() => document.getElementById('ai-desc')?.focus(), 250);
 }
 
 function analyzeWith(hint) {
@@ -1045,8 +1055,8 @@ async function runFoodPhoto(hint) {
 function showAiError(msg) {
   openSheet(`${sheetHead('לא הצלחתי לזהות', 'back-picker')}
     <p class="lead">${esc(msg || 'השירות עמוס כרגע או שאין חיבור. נסו שוב בעוד דקה, או הוסיפו ידנית.')}</p>
-    ${ai?.image ? '<button class="btn primary wide" data-act="ai-again">לנסות שוב</button>' : ''}
-    <button class="btn ${ai?.image ? 'ghost' : 'primary'} wide" data-act="pick-photo">תמונה אחרת</button>`);
+    ${ai && (ai.image || ai.hint) ? '<button class="btn primary wide" data-act="ai-again">לנסות שוב</button>' : ''}
+    ${ai?.hint && !ai.image ? '' : `<button class="btn ${ai?.image ? 'ghost' : 'primary'} wide" data-act="pick-photo">תמונה אחרת</button>`}`);
 }
 
 function aiScaled(it) {
@@ -1057,13 +1067,13 @@ function aiScaled(it) {
 function showAiResult() {
   const where = sheetCtx.kind === 'plan' ? `לתפריט · ${mealName(sheetCtx.mealId)}` : mealName(sheetCtx.mealId);
   openSheet(`
-    ${sheetHead('מה זוהה בתמונה', 'back-picker')}
+    ${sheetHead(ai.image ? 'מה זוהה בתמונה' : 'ההערכה', 'back-picker')}
     ${ai.items.length ? `<p class="lead small">זו הערכה. אפשר לתקן שמות וכמויות, ולבטל סימון של מה שלא נכון.</p>
     <div class="ai-list" id="ai-list">${ai.items.map((it, i) => aiRow(it, i)).join('')}</div>
-    <div class="amt-total" id="ai-total"></div>` : '<p class="empty">לא זוהה אוכל בתמונה.</p>'}
+    <div class="amt-total" id="ai-total"></div>` : `<p class="empty">${ai.image ? 'לא זוהה אוכל בתמונה.' : 'לא הצלחתי להבין מה אכלת. נסו לנסח אחרת.'}</p>`}
     ${ai.note ? `<p class="lead small">💡 ${esc(ai.note)}</p>` : ''}
     <details class="ai-hint">
-      <summary>לא מדויק? ספרו מה יש בצלחת ונסו שוב</summary>
+      <summary>${ai.image ? 'לא מדויק? ספרו מה יש בצלחת ונסו שוב' : 'לא מדויק? פרטו יותר ונסו שוב'}</summary>
       <textarea id="ai-hint" class="input textarea" rows="2" maxlength="300" placeholder="למשל: 150 גרם חזה עוף, כוס אורז, סלט עם כף שמן זית">${esc(ai.hint || '')}</textarea>
       <button class="btn wide" data-act="ai-retry">זיהוי מחדש</button>
     </details>
@@ -1383,7 +1393,13 @@ document.addEventListener('click', e => {
       el.textContent = it.on ? '✓' : '';
       renderAiTotal(); break;
     }
-    case 'ai-go': analyzeWith(document.getElementById('ai-desc').value.trim()); break;
+    case 'ai-go': {
+      const hint = document.getElementById('ai-desc').value.trim();
+      if (!ai.image && !hint) { toast('צריך לכתוב מה אכלת'); break; }
+      analyzeWith(hint); break;
+    }
+    case 'pick-text': ai = { image: '', items: [], note: '', hint: '' }; showAiCompose(); break;
+    case 'pick-ai-query': ai = { image: '', items: [], note: '', hint: '' }; analyzeWith(pick.query.trim()); break;
     case 'ai-retry': analyzeWith(document.getElementById('ai-hint').value.trim()); break;
     case 'ai-add': addAiItems(); break;
     case 'ai-again': showAiCompose(); break;

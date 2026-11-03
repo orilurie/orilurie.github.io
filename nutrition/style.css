@@ -440,3 +440,4 @@ body.readonly .check { pointer-events: none; }
 .cam-btns { display: flex; align-items: center; justify-content: space-around; padding: 14px 0 4px; }
 .shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid var(--accent); background: var(--card); box-shadow: inset 0 0 0 4px var(--card), inset 0 0 0 40px var(--accent-soft); }
 .shutter:active { transform: scale(.94); }
+.row.ai-search .row-name { color: var(--accent); }
