@@ -441,3 +441,4 @@ body.readonly .check { pointer-events: none; }
 .shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid var(--accent); background: var(--card); box-shadow: inset 0 0 0 4px var(--card), inset 0 0 0 40px var(--accent-soft); }
 .shutter:active { transform: scale(.94); }
 .row.ai-search .row-name { color: var(--accent); }
+.ai-per100 { font-size: .75rem; color: var(--muted); }

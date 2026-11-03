@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=9';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=9';
+} from './store.js?v=10';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=10';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
   unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
-} from './cloud.js?v=9';
+} from './cloud.js?v=10';
 
-export const VERSION = 9; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 10; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -998,7 +998,7 @@ function renderAmountTotal() {
 
 // ---------- food recognition from a photo (Gemini, through a Supabase function) ----------
 
-let ai = null;   // { items: [{ name, grams, g0, kcal0, p0, c0, f0, on }], note, image }
+let ai = null;   // { items: [{ name, grams, per100: { kcal, p, c, f }, on }], note, image, hint }
 
 function blobToBase64(blob) {
   return new Promise((res, rej) => {
@@ -1048,7 +1048,11 @@ function analyzeWith(hint) {
 async function runFoodPhoto(hint) {
   const res = await analyzeFoodPhoto(ai.image, hint);
   ai.note = res.note || '';
-  ai.items = (res.items || []).map(it => ({ name: it.name, grams: it.grams, g0: it.grams, kcal0: it.kcal, p0: it.p, c0: it.c, f0: it.f, on: true }));
+  ai.items = (res.items || []).map(it => {
+    // values per 100 g (from the AI, or derived from the portion for older answers)
+    const per100 = it.per100 || { kcal: it.grams ? (it.kcal / it.grams) * 100 : 0, p: it.grams ? (it.p / it.grams) * 100 : 0, c: it.grams ? (it.c / it.grams) * 100 : 0, f: it.grams ? (it.f / it.grams) * 100 : 0 };
+    return { name: it.name, grams: it.grams, per100, on: true };
+  });
   showAiResult();
 }
 
@@ -1060,8 +1064,8 @@ function showAiError(msg) {
 }
 
 function aiScaled(it) {
-  const k = it.g0 > 0 ? it.grams / it.g0 : 0;
-  return { kcal: Math.round(it.kcal0 * k), p: r1(it.p0 * k), c: r1(it.c0 * k), f: r1(it.f0 * k) };
+  const k = (it.grams || 0) / 100, n = it.per100;
+  return { kcal: Math.round(n.kcal * k), p: r1(n.p * k), c: r1(n.c * k), f: r1(n.f * k) };
 }
 
 function showAiResult() {
@@ -1091,6 +1095,7 @@ function aiRow(it, i) {
         <label class="ai-grams"><input class="input" data-ai-grams="${i}" inputmode="decimal" value="${it.grams}"><span>גרם</span></label>
         <span class="ai-kcal" id="ai-kcal-${i}"><b>${s.kcal}</b> קק״ל · ${macroLine(s)}</span>
       </div>
+      <div class="ai-per100">ל-100 ג׳: ${Math.round(it.per100.kcal)} קק״ל · ${macroLine({ p: r1(it.per100.p), c: r1(it.per100.c), f: r1(it.per100.f) })}</div>
     </div>
   </div>`;
 }
@@ -1107,8 +1112,8 @@ function addAiItems() {
   if (!chosen.length) { toast('לא נבחר כלום'); return; }
   const { kind, mealId, date } = sheetCtx;
   for (const it of chosen) {
-    const per100 = x => (it.g0 > 0 ? r1((x / it.g0) * 100) : 0);
-    const food = { id: null, name: it.name.trim(), kcal: per100(it.kcal0), p: per100(it.p0), c: per100(it.c0), f: per100(it.f0), units: [] };
+    const n = it.per100;
+    const food = { id: null, name: it.name.trim(), kcal: r1(n.kcal), p: r1(n.p), c: r1(n.c), f: r1(n.f), units: [] };
     const item = makeItem(food, 'גרם', r1(it.grams));
     if (kind === 'plan') planItems(mealId).push(item);
     else day(date).entries.push({ ...item, mealId });
