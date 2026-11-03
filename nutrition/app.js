@@ -5,16 +5,16 @@ import {
   day, peekDay, planItems, setWeight, latestWeight, onSave,
   targetsFor, setTargetsFrom, deleteTargetChange, nextTargetChange, trackWater,
   withState, MEASURES, setMeasurement, deleteMeasurement,
-} from './store.js?v=5';
-import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=5';
+} from './store.js?v=6';
+import { CATEGORIES, BUILTIN_FOODS } from './foods.js?v=6';
 import {
   cloudEnabled, initCloud, push, refresh, currentUser, deleteCloudData,
   signInEmail, signOut, authError,
   listShares, addShare, removeShare, fetchUserData, sendMessage, listMessages, deleteMessage,
-  unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto,
-} from './cloud.js?v=5';
+  unreadMessages, markRead, uploadPhoto, photoUrls, deletePhoto, analyzeFoodPhoto,
+} from './cloud.js?v=6';
 
-export const VERSION = 5; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
+export const VERSION = 6; // bump on every deploy, together with version.json, the ?v= in index.html and the imports above
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -431,9 +431,9 @@ async function loadPhotoThumbs() {
 }
 
 // Shrinks a photo to at most 1280px so it uploads fast and stays small.
-async function compressImage(file) {
+async function compressImage(file, max = 1280) {
   const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * scale);
   c.height = Math.round(bmp.height * scale);
@@ -849,6 +849,7 @@ function showPicker() {
     <div class="chips" id="pick-chips">${catChips(pick.cat, true, 'pick-cat')}</div>
     <div class="list sheet-list" id="pick-list"></div>
     <div class="btn-row sheet-foot">
+      ${currentUser() ? '<button class="btn" data-act="pick-photo">📷 מתמונה</button>' : ''}
       <button class="btn" data-act="pick-new">＋ מזון חדש</button>
       ${sheetCtx.kind === 'log' ? '<button class="btn" data-act="pick-quick">הוספה מהירה</button>' : ''}
     </div>`);
@@ -907,6 +908,107 @@ function renderAmountTotal() {
   if (!el) return;
   const it = amountTotals();
   el.innerHTML = `<b>${it.kcal}</b> קק״ל <span class="muted">(${Math.round(it.grams)} ג׳)</span><div>${macroLine(it)}</div>`;
+}
+
+
+// ---------- food recognition from a photo (Gemini, through a Supabase function) ----------
+
+let ai = null;   // { items: [{ name, grams, g0, kcal0, p0, c0, f0, on }], note, image }
+
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function startFoodPhoto(file) {
+  const ctx = sheetCtx;
+  openSheet(`${sheetHead('מזהה את האוכל…')}
+    <div class="ai-wait"><div class="spinner"></div><p class="lead">זה לוקח כמה שניות 🍽️</p></div>`);
+  sheetCtx = ctx;
+  try {
+    const image = await blobToBase64(await compressImage(file, 1024));
+    ai = { image, items: [], note: '' };
+    await runFoodPhoto('');
+  } catch (e) {
+    console.error(e);
+    showAiError();
+  }
+}
+
+async function runFoodPhoto(hint) {
+  const res = await analyzeFoodPhoto(ai.image, hint);
+  ai.note = res.note || '';
+  ai.items = (res.items || []).map(it => ({ name: it.name, grams: it.grams, g0: it.grams, kcal0: it.kcal, p0: it.p, c0: it.c, f0: it.f, on: true }));
+  showAiResult();
+}
+
+function showAiError(msg) {
+  openSheet(`${sheetHead('לא הצלחתי לזהות', 'back-picker')}
+    <p class="lead">${esc(msg || 'השירות עמוס כרגע או שאין חיבור. נסו שוב בעוד דקה, או הוסיפו ידנית.')}</p>
+    <button class="btn primary wide" data-act="pick-photo">לנסות שוב</button>`);
+}
+
+function aiScaled(it) {
+  const k = it.g0 > 0 ? it.grams / it.g0 : 0;
+  return { kcal: Math.round(it.kcal0 * k), p: r1(it.p0 * k), c: r1(it.c0 * k), f: r1(it.f0 * k) };
+}
+
+function showAiResult() {
+  const where = sheetCtx.kind === 'plan' ? `לתפריט · ${mealName(sheetCtx.mealId)}` : mealName(sheetCtx.mealId);
+  openSheet(`
+    ${sheetHead('מה זוהה בתמונה', 'back-picker')}
+    ${ai.items.length ? `<p class="lead small">זו הערכה. אפשר לתקן שמות וכמויות, ולבטל סימון של מה שלא נכון.</p>
+    <div class="ai-list" id="ai-list">${ai.items.map((it, i) => aiRow(it, i)).join('')}</div>
+    <div class="amt-total" id="ai-total"></div>` : '<p class="empty">לא זוהה אוכל בתמונה.</p>'}
+    ${ai.note ? `<p class="lead small">💡 ${esc(ai.note)}</p>` : ''}
+    <details class="ai-hint">
+      <summary>לא מדויק? ספרו מה יש בצלחת ונסו שוב</summary>
+      <textarea id="ai-hint" class="input textarea" rows="2" maxlength="300" placeholder="למשל: 150 גרם חזה עוף, כוס אורז, סלט עם כף שמן זית"></textarea>
+      <button class="btn wide" data-act="ai-retry">זיהוי מחדש</button>
+    </details>
+    ${ai.items.length ? `<button class="btn primary wide" data-act="ai-add">הוספה ל${esc(where)}</button>` : ''}`);
+  renderAiTotal();
+}
+
+function aiRow(it, i) {
+  const s = aiScaled(it);
+  return `<div class="ai-row ${it.on ? '' : 'off'}" data-i="${i}">
+    <button class="check" data-act="ai-toggle" data-i="${i}" aria-label="${it.on ? 'בטל' : 'סמן'}">${it.on ? '✓' : ''}</button>
+    <div class="ai-main">
+      <input class="input ai-name" data-ai-name="${i}" value="${esc(it.name)}">
+      <div class="ai-sub">
+        <label class="ai-grams"><input class="input" data-ai-grams="${i}" inputmode="decimal" value="${it.grams}"><span>גרם</span></label>
+        <span class="ai-kcal" id="ai-kcal-${i}"><b>${s.kcal}</b> קק״ל · ${macroLine(s)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAiTotal() {
+  const el = document.getElementById('ai-total');
+  if (!el) return;
+  const t = sum(ai.items.filter(it => it.on).map(aiScaled));
+  el.innerHTML = `סה״כ <b>${t.kcal}</b> קק״ל<div>${macroLine(t)}</div>`;
+}
+
+function addAiItems() {
+  const chosen = ai.items.filter(it => it.on && it.grams > 0 && it.name.trim());
+  if (!chosen.length) { toast('לא נבחר כלום'); return; }
+  const { kind, mealId, date } = sheetCtx;
+  for (const it of chosen) {
+    const per100 = x => (it.g0 > 0 ? r1((x / it.g0) * 100) : 0);
+    const food = { id: null, name: it.name.trim(), kcal: per100(it.kcal0), p: per100(it.p0), c: per100(it.c0), f: per100(it.f0), units: [] };
+    const item = makeItem(food, 'גרם', r1(it.grams));
+    if (kind === 'plan') planItems(mealId).push(item);
+    else day(date).entries.push({ ...item, mealId });
+  }
+  save(); closeSheet(); render();
+  toast(`נוספו ${chosen.length} פריטים`);
+  ai = null;
 }
 
 function commitItem(item) {
@@ -1170,6 +1272,22 @@ document.addEventListener('click', e => {
     case 'pick-food': { const f = getFood(id); if (f) openAmount(f); break; }
     case 'pick-new': openFoodEditor(null, true); break;
     case 'pick-quick': showQuick(); break;
+    case 'pick-photo': document.getElementById('food-photo-input').click(); break;
+    case 'ai-toggle': {
+      const it = ai.items[+el.dataset.i];
+      it.on = !it.on;
+      const row = el.closest('.ai-row');
+      row.classList.toggle('off', !it.on);
+      el.textContent = it.on ? '✓' : '';
+      renderAiTotal(); break;
+    }
+    case 'ai-retry': {
+      const hint = document.getElementById('ai-hint').value.trim();
+      openSheet(`${sheetHead('מזהה שוב…')}<div class="ai-wait"><div class="spinner"></div></div>`);
+      runFoodPhoto(hint).catch(e => { console.error(e); showAiError(); });
+      break;
+    }
+    case 'ai-add': addAiItems(); break;
     case 'back-picker': amt = null; foodEdit = null; showPicker(); break;
     case 'quick-save': {
       const v = k => document.getElementById(k).value;
@@ -1304,6 +1422,14 @@ document.addEventListener('input', e => {
   else if (t.id === 'foods-search') { foodsQuery = t.value; renderFoodsList(); }
   else if (t.id === 'amt-qty') { amt.qty = num(t.value); renderAmountTotal(); }
   else if (t.id && t.id.startsWith('t-')) updateTargetsCheck();
+  else if (t.dataset.aiName !== undefined) ai.items[+t.dataset.aiName].name = t.value;
+  else if (t.dataset.aiGrams !== undefined) {
+    const i = +t.dataset.aiGrams, it = ai.items[i];
+    it.grams = num(t.value);
+    const sc = aiScaled(it);
+    document.getElementById(`ai-kcal-${i}`).innerHTML = `<b>${sc.kcal}</b> קק״ל · ${macroLine(sc)}`;
+    renderAiTotal();
+  }
   else if (t.dataset.target) {
     const v = num(t.value);
     if (t.dataset.target === 'water') { state.targets.waterMl = Math.round(v * 1000); save(); }
@@ -1314,6 +1440,7 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'food-photo-input' && t.files[0]) { const f = t.files[0]; t.value = ''; startFoodPhoto(f); return; }
   if (t.id === 'photo-input' && t.files[0]) { addPhoto(t.files[0]); t.value = ''; return; }
   if (t.id === 'track-water') { state.trackWater = t.checked; save(); render(); return; }
   if (t.dataset.mealName) {

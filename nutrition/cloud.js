@@ -323,3 +323,13 @@ export async function deletePhoto(path) {
   if (error) throw error;
   urlCache.delete(path);
 }
+
+// ---------- food recognition from a photo ----------
+// Runs in the Supabase function "nutrition-food-photo" (it holds the Gemini key).
+// Returns { items: [{ name, grams, kcal, p, c, f }], note }.
+export async function analyzeFoodPhoto(image, hint = '') {
+  const { data, error } = await sb.functions.invoke('nutrition-food-photo', { body: { image, hint } });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
