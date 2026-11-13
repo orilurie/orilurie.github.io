@@ -1,8 +1,8 @@
 // צוללות – HUD (DOM overlay) and controller between the game state and the 3D scene.
 
-import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=22';
-import { play, haptic } from './sfx.js?v=22';
-import { confetti } from './anim.js?v=22';
+import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=23';
+import { play, haptic } from './sfx.js?v=23';
+import { confetti } from './anim.js?v=23';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nameOf = type => FLEET.find(f => f.type === type).name;
@@ -17,6 +17,24 @@ export const battleshipRulesHtml = () => `<ul>
 </ul>`;
 
 let ctx = null; // { render, send, toast, ui }
+
+// Visual settings, remembered on this device.
+const OPT_KEY = 'hathatul-bs-opts';
+const OPT_LABELS = [
+  ['topDown', '🛰️ מבט מלמעלה', 'הלוח נראה ממש מלמעלה, כמו מפה'],
+  ['smoke', '💨 עשן', 'עשן מפיצוצים, מספינות בוערות ומשובל הטיל'],
+  ['fire', '🔥 אש ולהבות', 'להבות על משבצות שנפגעו'],
+  ['shake', '📳 רעידת מצלמה', 'המסך רועד בפיצוץ'],
+  ['bloom', '✨ זוהר', 'הילה זוהרת סביב אש ושמש (כבד יותר לטלפון)'],
+];
+export const bsOpts = (() => {
+  const d = { topDown: false, smoke: true, fire: true, shake: true, bloom: true };
+  try { return { ...d, ...JSON.parse(localStorage.getItem(OPT_KEY) || '{}') }; } catch { return d; }
+})();
+function saveOpts() {
+  try { localStorage.setItem(OPT_KEY, JSON.stringify(bsOpts)); } catch {}
+  scene?.setOptions(bsOpts);
+}
 let scene = null, loading = null, failed = false;
 let queue = Promise.resolve();
 const pending = new Set(); // markers/sinks still being animated: "grid:x,y", "sink:grid:type"
@@ -59,7 +77,9 @@ export function renderBattleshipHud(v, ui) {
   return `
     <div class="bs-hud">
       <header class="top bs-top">
-        <div><b>🚢 צוללות</b> · ${ui.room.test ? '🧪 בדיקה' : `חדר <span dir="ltr">${ui.room.code}</span>`}</div>
+        <div class="bs-title"><b>🚢 צוללות</b>${ui.room.test ? ' · 🧪' : ''}</div>
+        <button class="ghost bs-tv" data-act="bsTopDown" title="החלפת מבט">${bsOpts.topDown ? '🎥 קולנועי' : '🛰️ מלמעלה'}</button>
+        <button class="ghost icon-btn" data-act="bsSettings" aria-label="הגדרות תצוגה" title="הגדרות תצוגה">⚙️</button>
         ${ui.headerButtons}
       </header>
       <div class="bs-versus">
@@ -75,7 +95,17 @@ export function renderBattleshipHud(v, ui) {
         <div class="bs-row">${viewBtn}${ui.emojiBar}</div>
       </div>
     </div>
-    ${v.phase === 'end' && ui.resultsReady ? resultsHtml(v, ui) : ''}`;
+    ${v.phase === 'end' && ui.resultsReady ? resultsHtml(v, ui) : ''}
+    ${ui.bsSettingsOpen ? settingsHtml() : ''}`;
+}
+
+function settingsHtml() {
+  return `<div class="overlay"><div class="panel bs-settings" role="dialog" aria-modal="true">
+    <h2>⚙️ הגדרות תצוגה</h2>
+    ${OPT_LABELS.map(([k, label, hint]) => `<button class="bs-opt ${bsOpts[k] ? 'on' : ''}" data-act="bsOpt" data-o="${k}" role="switch" aria-checked="${bsOpts[k]}">
+      <span class="bs-opt-text"><b>${label}</b><small>${hint}</small></span><span class="bs-switch"></span></button>`).join('')}
+    <button class="primary" data-act="bsSettings">סגירה</button>
+  </div></div>`;
 }
 
 function resultsHtml(v, ui) {
@@ -83,7 +113,7 @@ function resultsHtml(v, ui) {
   return `<div class="overlay"><div class="panel results bs-results">
     <div class="bs-res-icon">${won ? '🏆' : '⚓'}</div>
     <h2>${won ? 'ניצחת בקרב!' : `${esc(v.players[v.winner].name)} ניצח/ה`}</h2>
-    <p class="sub">${won ? 'כל הצי של היריב בקרקעית הים.' : 'הצי שלך הוטבע. בפעם הבאה!'}</p>
+    <p class="sub">${won ? 'כל הצי של היריב הוטבע.' : 'הצי שלך הוטבע. בפעם הבאה!'}</p>
     <table><tbody>${v.players.map(p => `<tr class="${p.id === v.players[v.winner].id ? 'win' : ''}"><td>${esc(p.name)}</td><td>🏆 ${p.wins}</td></tr>`).join('')}</tbody></table>
     ${ui.room.isHost ? `<button class="primary" data-act="nextRound">⚓ קרב חוזר</button>` : `<p class="sub">מחכים למארח/ת…</p>`}
     <button class="ghost" data-act="closeResults">הצג את הים</button>
@@ -91,7 +121,8 @@ function resultsHtml(v, ui) {
 }
 
 // ---------- actions from the HUD ----------
-export function battleshipAct(act, ui) {
+export function battleshipAct(act, ui, el) {
+  if (act === 'bsOpt') { const k = el.dataset.o; bsOpts[k] = !bsOpts[k]; saveOpts(); play('pop'); return true; }
   const v = ui.view;
   if (act === 'bsRandom') { ui.bsFleet = randomFleet(); ui.bsSel = null; play('shuffle'); return true; }
   if (act === 'bsRotate' && ui.bsSel) {
@@ -110,6 +141,8 @@ export function battleshipAct(act, ui) {
     return true;
   }
   if (act === 'bsFire') { fire(ui); return true; }
+  if (act === 'bsTopDown') { bsOpts.topDown = !bsOpts.topDown; saveOpts(); play('pop'); return true; }
+  if (act === 'bsSettings') { ui.bsSettingsOpen = !ui.bsSettingsOpen; return true; }
   if (act === 'bsView') {
     ui.bsViewNow = (ui.bsViewNow || 'mine') === 'enemy' ? 'mine' : 'enemy';
     ui.bsManualView = true;
@@ -174,9 +207,10 @@ export function syncBattleship(v, ui) {
         stage.id = 'bs-stage';
         document.body.prepend(stage);
       }
-      loading = import('./battleship-3d.js?v=22').then(m => {
+      loading = import('./battleship-3d.js?v=23').then(m => {
         if (!m.webglAvailable()) { failed = true; ctx.render(); return; }
         scene = new m.Battle3D(stage, { onCell, onShip });
+        scene.setOptions(bsOpts);
         if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { __bsScene: scene, __bsUi: ctx.ui, __bsCell: onCell });
         syncBattleship(ctx.ui.view, ctx.ui);
       }).catch(err => { console.error(err); failed = true; ctx.render(); });
@@ -268,7 +302,7 @@ export function playBattleshipEvents(fresh, before, v) {
         if (ev.sunk) {
           await wait(700);
           play('sink');
-          banner(mine ? `🔥 הטבעת את ה${nameOf(ev.sunk.type)}!` : `☠️ ה${nameOf(ev.sunk.type)} שלך טובעה!`, 'big');
+          banner(mine ? `🔥 הטבעת את ה${nameOf(ev.sunk.type)}!` : `☠️ ה${nameOf(ev.sunk.type)} שלך הוטבעה!`, 'big');
           haptic('call');
           if (mine) await scene.revealAndSink(ev.sunk);
           else await scene.sinkShip('mine', ev.sunk.type);

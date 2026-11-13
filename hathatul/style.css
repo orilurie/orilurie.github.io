@@ -569,3 +569,20 @@ body:not(.bs-on) #bs-stage { display: none; }
   .bs-hint { display: none; }
 }
 #app.bs .overlay { pointer-events: auto; z-index: 20; }
+
+/* ---- צוללות: view toggle & settings ---- */
+.bs-top .bs-tv { font-size: .8rem; padding: 4px 8px; border: 1px solid rgba(255, 255, 255, .25); border-radius: 999px; }
+.bs-settings { text-align: start; max-width: 380px; }
+.bs-settings h2 { margin-bottom: 10px; }
+.bs-opt {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  text-align: start; margin-bottom: 8px; padding: 10px 12px; background: var(--bg);
+}
+.bs-opt-text { display: flex; flex-direction: column; gap: 2px; }
+.bs-opt-text small { color: var(--muted); font-weight: 400; font-size: .78rem; }
+.bs-switch { flex-shrink: 0; width: 42px; height: 24px; border-radius: 999px; background: var(--line); position: relative; transition: background .2s; }
+.bs-switch::after { content: ''; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); transition: right .2s; }
+.bs-opt.on .bs-switch { background: #1fb36b; }
+.bs-opt.on .bs-switch::after { right: 21px; }
+.bs-settings > .primary { width: 100%; margin-top: 6px; }
+.bs-title { white-space: nowrap; }

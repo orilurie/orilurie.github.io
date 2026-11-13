@@ -1,11 +1,11 @@
-import * as Hathatul from './game.js?v=22';
-import * as Quartets from './quartets.js?v=22';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=22';
-import * as Battleship from './battleship.js?v=22';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=22';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=22';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=22';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=22';
+import * as Hathatul from './game.js?v=23';
+import * as Quartets from './quartets.js?v=23';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=23';
+import * as Battleship from './battleship.js?v=23';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=23';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=23';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=23';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=23';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -15,7 +15,7 @@ const GAMES = {
   battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 22; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 23; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -948,7 +948,8 @@ function onAct(el) {
     case 'exitTest': location.href = homeUrl(); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
     case 'bsRandom': case 'bsRotate': case 'bsReady': case 'bsFire': case 'bsView':
-      if (battleshipAct(act, ui)) render();
+    case 'bsTopDown': case 'bsSettings': case 'bsOpt':
+      if (battleshipAct(act, ui, el)) render();
       return;
     case 'pickGame':
       ui.gameType = el.dataset.g;

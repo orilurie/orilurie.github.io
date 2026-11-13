@@ -12,6 +12,7 @@ const SIZE = 10;
 // Grid origins (top-left cell corner) in world space. The player's own waters are nearer the camera.
 const GRIDS = { enemy: { ox: -5, oz: -13 }, mine: { ox: -5, oz: 2 } };
 const GRID_Y = 0.32;
+const WRECK_Y = -0.12; // how low a sunk ship rests (deck just above the water)
 const SUN_DIR = new THREE.Vector3(-0.35, 0.22, -1).normalize();
 
 // ---------- waves (same formula in the shader and on the CPU, so ships ride the water) ----------
@@ -129,7 +130,7 @@ void main() {
   float border = 1.0 - smoothstep(0.0, 0.06, min(edge.x, edge.y));
   float a = 0.045 + line * 0.42 + border * 0.75;
   vec3 col = uColor;
-  vec2 c = floor(g);
+  vec2 c = vec2(floor(g.x), floor(${SIZE.toFixed(1)} - g.y)); // uv.y grows northwards, rows grow southwards
   if (uCell.x >= 0.0 && c == uCell) {
     float pulse = 0.55 + 0.45 * sin(uTime * 6.0);
     col = mix(col, uCellColor, 0.9);
@@ -408,6 +409,7 @@ export class Battle3D {
     this.fires = []; // persistent burning spots
     this.anims = []; // per-frame tweens: fn(dt) -> done?
     this.shakeAmt = 0;
+    this.opts = { smoke: true, fire: true, shake: true, bloom: true, topDown: false };
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -554,7 +556,7 @@ export class Battle3D {
 
   // ---------- camera ----------
   presetFor(view) {
-    const pitch = THREE.MathUtils.degToRad(view === 'overview' ? 52 : 38);
+    const pitch = THREE.MathUtils.degToRad(this.opts.topDown ? 84 : view === 'overview' ? 52 : 38);
     const back = new THREE.Vector3(0, Math.sin(pitch), Math.cos(pitch));
     // board corners that must be on screen (with room for the labels)
     let corners;
@@ -619,7 +621,17 @@ export class Battle3D {
     else this.setView(this.view, true);
   }
 
-  shake(amount) { this.shakeAmt = Math.max(this.shakeAmt, amount); }
+  shake(amount) { if (this.opts.shake) this.shakeAmt = Math.max(this.shakeAmt, amount); }
+
+  // Player's visual settings: { smoke, fire, shake, bloom, topDown }
+  setOptions(o) {
+    const viewChanged = o.topDown !== undefined && o.topDown !== this.opts.topDown;
+    Object.assign(this.opts, o);
+    this.bloom.enabled = this.opts.bloom && this.quality !== 'low';
+    if (!this.opts.shake) this.shakeAmt = 0;
+    if (viewChanged) this.setView(this.view);
+  }
+  smokeSpawn(o) { if (this.opts.smoke) this.smokeP.spawn(o); }
 
   // ---------- input ----------
   bindInput() {
@@ -679,6 +691,11 @@ export class Battle3D {
     for (const s of fleet || []) {
       keep.add(s.type);
       let e = map.get(s.type);
+      if (e && (e.sunk || e.darkened) && !s.sunk && !e.sinking) { // new battle: a fresh ship, not last game's wreck
+        this.scene.remove(e.group);
+        map.delete(s.type);
+        e = null;
+      }
       if (!e) {
         const group = buildShip(s.type, s.len);
         group.rotation.order = 'YZX'; // yaw in the world, then pitch along the hull and roll across it
@@ -708,9 +725,8 @@ export class Battle3D {
           if (m.emissiveIntensity !== undefined) m.emissiveIntensity = sel ? 0.9 : 1;
         }
       });
-      if (s.sunk && !e.sunk && !e.sinking) { // already sunk when we arrived: rest on the bottom
-        e.sunk = true;
-        e.group.visible = false;
+      if (s.sunk && !e.sunk && !e.sinking) { // already sunk when we arrived: show the wreck
+        this.wreck(e);
       }
     }
     for (const [type, e] of map) {
@@ -783,6 +799,7 @@ export class Battle3D {
   // ---------- effects ----------
   // A sprite that grows and fades: s0 -> s1 world units over `dur`, rising `rise` units.
   puff(kind, pos, { s0, s1, dur, rise = 0, delay = 0, additive = true, opacity = 1, drift = null }) {
+    if (kind === 'smoke' && !this.opts.smoke) return;
     const sp = glowSprite(kind, additive);
     sp.position.copy(pos);
     sp.scale.setScalar(0.0001);
@@ -837,7 +854,7 @@ export class Battle3D {
       });
     }
     for (let i = 0; i < (big ? 45 : 28); i++) {
-      this.smokeP.spawn({
+      this.smokeSpawn({
         pos: { x: pos.x + rand(-0.3, 0.3), y: pos.y + rand(0.1, 0.5), z: pos.z + rand(-0.3, 0.3) },
         vel: { x: rand(-0.6, 0.6), y: rand(0.8, 2), z: rand(-0.6, 0.6) },
         life: rand(1.6, 3.2), size: [rand(0.8, 1.2), rand(2.6, 4)], color: [C('#3a3330'), C('#8b8580')], alpha: [0.75, 0], gravity: -0.15, drag: 0.8,
@@ -938,7 +955,7 @@ export class Battle3D {
           acc -= 0.012;
           const back = new THREE.Vector3(0, 0, -0.6).applyQuaternion(g.quaternion).add(pos);
           this.fireP.spawn({ pos: back, vel: { x: rand(-0.2, 0.2), y: rand(-0.2, 0.2), z: rand(-0.2, 0.2) }, life: 0.3, size: [0.8, 0.2], color: [C('#fff3c4'), C('#ff6a00')], alpha: [1, 0], drag: 1 });
-          this.smokeP.spawn({ pos: back, vel: { x: rand(-0.15, 0.15), y: rand(0.05, 0.3), z: rand(-0.15, 0.15) }, life: rand(1.2, 2), size: [0.5, 1.8], color: [C('#e6e1dc'), C('#a39d98')], alpha: [0.6, 0], drag: 0.6 });
+          this.smokeSpawn({ pos: back, vel: { x: rand(-0.15, 0.15), y: rand(0.05, 0.3), z: rand(-0.15, 0.15) }, life: rand(1.2, 2), size: [0.5, 1.8], color: [C('#e6e1dc'), C('#a39d98')], alpha: [0.6, 0], drag: 0.6 });
         }
         if (k >= 1) {
           this.scene.remove(g);
@@ -975,17 +992,38 @@ export class Battle3D {
     this.markers.get(`${targetGrid}:${x},${y}`).fresh = true;
   }
 
-  // Sink a ship: list, roll and slide under with bubbles and smoke.
+  darken(e) {
+    if (e.darkened) return;
+    e.darkened = true;
+    e.group.traverse(o => {
+      if (!o.isMesh) return;
+      for (const m of [].concat(o.material)) { if (m.color) m.color.multiplyScalar(0.5); }
+    });
+  }
+
+  // A sunk ship stays on the board as a wreck: low in the water, listing, scorched.
+  wreck(e) {
+    this.darken(e);
+    e.sunk = true;
+    e.sinking = false;
+    e.group.visible = true;
+    e.wreckRoll = e.wreckRoll ?? rand(0.22, 0.32) * (Math.random() < 0.5 ? -1 : 1);
+    e.wreckPitch = e.wreckPitch ?? rand(-0.1, 0.1);
+    e.group.rotation.z = e.wreckPitch;
+    e.group.rotation.x = e.wreckRoll;
+    e.group.position.set(e.base.x, WRECK_Y, e.base.z);
+  }
+
+  // Sink a ship: it lists, rolls and settles low in the water with bubbles and smoke.
   sinkShip(grid, type) {
     const e = this.ships[grid].get(type);
     if (!e || e.sinking || e.sunk) return Promise.resolve();
     e.sinking = true;
     const g = e.group;
-    const roll = rand(0.35, 0.6) * (Math.random() < 0.5 ? -1 : 1), pitch = rand(-0.25, 0.25);
-    g.traverse(o => {
-      if (!o.isMesh) return;
-      for (const m of [].concat(o.material)) { if (m.color) m.color.multiplyScalar(0.55); }
-    });
+    e.wreckRoll = rand(0.22, 0.32) * (Math.random() < 0.5 ? -1 : 1);
+    e.wreckPitch = rand(-0.1, 0.1);
+    const roll = e.wreckRoll * 2.2, pitch = e.wreckPitch * 2;
+    this.darken(e);
     return new Promise(res => {
       let t = 0, acc = 0;
       const dur = 3.2;
@@ -993,20 +1031,20 @@ export class Battle3D {
       this.anims.push(dt => {
         t += dt;
         const k = Math.min(t / dur, 1);
-        g.rotation.z = roll * ease(Math.min(k * 1.6, 1));
-        g.rotation.x = pitch * ease(k);
-        g.position.y = startY - 1.6 * ease(k);
+        // heel over hard, then settle back to the wreck's resting list
+        const heel = k < 0.5 ? ease(k * 2) : 1 - ease((k - 0.5) * 2) * 0.55;
+        g.rotation.x = roll * heel;
+        g.rotation.z = pitch * ease(k);
+        g.position.y = startY + (WRECK_Y - startY) * ease(k);
         acc += dt;
         if (acc > 0.05 && k < 0.9) {
           acc = 0;
           const p = g.position;
           this.waterP.spawn({ pos: { x: p.x + rand(-0.8, 0.8), y: 0.25, z: p.z + rand(-0.8, 0.8) }, vel: { x: 0, y: rand(0.3, 0.8), z: 0 }, life: 0.8, size: [0.15, 0.3], color: [C('#ffffff'), C('#cdeeff')], alpha: [0.9, 0], drag: 1 });
-          this.smokeP.spawn({ pos: { x: p.x + rand(-0.5, 0.5), y: 0.6, z: p.z + rand(-0.5, 0.5) }, vel: { x: rand(-0.2, 0.2), y: rand(0.8, 1.4), z: rand(-0.2, 0.2) }, life: 2.5, size: [0.8, 2.6], color: [C('#2c2724'), C('#6f6a66')], alpha: [0.6, 0], drag: 0.5 });
+          this.smokeSpawn({ pos: { x: p.x + rand(-0.5, 0.5), y: 0.6, z: p.z + rand(-0.5, 0.5) }, vel: { x: rand(-0.2, 0.2), y: rand(0.8, 1.4), z: rand(-0.2, 0.2) }, life: 2.5, size: [0.8, 2.6], color: [C('#2c2724'), C('#6f6a66')], alpha: [0.6, 0], drag: 0.5 });
         }
         if (k >= 1) {
-          e.sinking = false;
-          e.sunk = true;
-          g.visible = false;
+          this.wreck(e);
           res();
           return true;
         }
@@ -1019,7 +1057,7 @@ export class Battle3D {
   revealAndSink(spec) {
     this.syncShips('enemy', [...[...this.ships.enemy.values()].map(e => e.spec), spec]);
     const e = this.ships.enemy.get(spec.type);
-    if (e) e.group.position.y = -0.6;
+    if (e) { e.sunk = false; e.group.visible = true; e.group.position.y = 0; }
     return new Promise(r => setTimeout(r, 350)).then(() => this.sinkShip('enemy', spec.type));
   }
 
@@ -1037,8 +1075,13 @@ export class Battle3D {
     // ships ride the waves: height from the wave function, pitch/roll from its slope
     for (const map of Object.values(this.ships)) {
       for (const e of map.values()) {
-        if (e.sinking || e.sunk) continue;
+        if (e.sinking) continue;
         const p = e.group.position;
+        if (e.sunk) { // wrecks rock gently, low in the water
+          p.y = WRECK_Y + waveHeight(p.x, p.z, t) * 0.5;
+          e.group.rotation.x = e.wreckRoll + Math.sin(t * 0.9 + p.x) * 0.03;
+          continue;
+        }
         const h = waveHeight(p.x, p.z, t);
         const fwd = new THREE.Vector3(Math.cos(e.yaw), 0, -Math.sin(e.yaw));
         const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
@@ -1055,14 +1098,15 @@ export class Battle3D {
     for (const m of this.markers.values()) {
       m.mesh.position.y = waveHeight(m.x, m.z, t) * 0.9;
       const f = m.mesh.userData.flame;
-      if (f) f.scale.setScalar(1 + 0.25 * Math.sin(t * 13 + m.seed) + 0.12 * Math.sin(t * 29 + m.seed * 2));
+      if (f) f.visible = this.opts.fire;
+      if (f && this.opts.fire) f.scale.setScalar(1 + 0.25 * Math.sin(t * 13 + m.seed) + 0.12 * Math.sin(t * 29 + m.seed * 2));
     }
 
     // burning hits: flickering flames and a slow column of dark smoke
     for (const f of this.fires) {
       f.acc += dt;
       f.smoke = (f.smoke || Math.random() * 0.4) + dt;
-      if (f.smoke > 0.45) {
+      if (f.smoke > 0.45 && this.opts.fire) {
         f.smoke = 0;
         this.puff('smoke', new THREE.Vector3(f.x + rand(-0.1, 0.1), waveHeight(f.x, f.z, t) + 0.8, f.z + rand(-0.1, 0.1)), {
           s0: 0.4, s1: rand(1.8, 2.6), dur: rand(2.6, 3.4), rise: rand(2.6, 3.6), additive: false, opacity: 0.55, drift: { x: rand(0.5, 1.1), z: rand(-0.4, 0) },
@@ -1071,8 +1115,9 @@ export class Battle3D {
       const y = waveHeight(f.x, f.z, t) + 0.35;
       while (f.acc > 0.06) {
         f.acc -= 0.06;
+        if (!this.opts.fire) continue;
         this.fireP.spawn({ pos: { x: f.x + rand(-0.15, 0.15), y, z: f.z + rand(-0.15, 0.15) }, vel: { x: rand(-0.15, 0.15), y: rand(0.8, 1.6), z: rand(-0.15, 0.15) }, life: rand(0.35, 0.6), size: [0.5, 0.15], color: [C('#ffd46b'), C('#ff3300')], alpha: [0.9, 0], drag: 1 });
-        if (Math.random() < 0.45) this.smokeP.spawn({ pos: { x: f.x, y: y + 0.4, z: f.z }, vel: { x: rand(-0.1, 0.25), y: rand(0.6, 1.1), z: rand(-0.2, 0.1) }, life: rand(2, 3), size: [0.4, 1.8], color: [C('#2f2a27'), C('#7c7671')], alpha: [0.5, 0], drag: 0.3 });
+        if (Math.random() < 0.45) this.smokeSpawn({ pos: { x: f.x, y: y + 0.4, z: f.z }, vel: { x: rand(-0.1, 0.25), y: rand(0.6, 1.1), z: rand(-0.2, 0.1) }, life: rand(2, 3), size: [0.4, 1.8], color: [C('#2f2a27'), C('#7c7671')], alpha: [0.5, 0], drag: 0.3 });
       }
     }
 
@@ -1115,7 +1160,7 @@ export class Battle3D {
     this.frameTimes = [];
     if (avg > 1 / 32) {
       this.quality = 'low';
-      this.bloom.enabled = false;
+      this.bloom.enabled = false; // stays off: setOptions checks quality
       this.renderer.setPixelRatio(1);
       this.resize();
     }
