@@ -1,11 +1,11 @@
-import * as Hathatul from './game.js?v=24';
-import * as Quartets from './quartets.js?v=24';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=24';
-import * as Battleship from './battleship.js?v=24';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=24';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=24';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=24';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=24';
+import * as Hathatul from './game.js?v=25';
+import * as Quartets from './quartets.js?v=25';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=25';
+import * as Battleship from './battleship.js?v=25';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=25';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=25';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=25';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=25';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -15,7 +15,7 @@ const GAMES = {
   battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 24; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 25; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.

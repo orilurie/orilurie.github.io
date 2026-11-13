@@ -1,8 +1,8 @@
 // צוללות – HUD (DOM overlay) and controller between the game state and the 3D scene.
 
-import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=24';
-import { play, haptic } from './sfx.js?v=24';
-import { confetti } from './anim.js?v=24';
+import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=25';
+import { play, haptic } from './sfx.js?v=25';
+import { confetti } from './anim.js?v=25';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nameOf = type => FLEET.find(f => f.type === type).name;
@@ -24,11 +24,12 @@ const OPT_LABELS = [
   ['topDown', '🛰️ מבט מלמעלה', 'הלוח נראה ממש מלמעלה, כמו מפה'],
   ['smoke', '💨 עשן', 'עשן מפיצוצים, מספינות בוערות ומשובל הטיל'],
   ['fire', '🔥 אש ולהבות', 'להבות על משבצות שנפגעו'],
+  ['chase', '🎬 מעקב אחרי הטיל', 'המצלמה רודפת אחרי הטיל ורואה את הפגיעה מקרוב'],
   ['shake', '📳 רעידת מצלמה', 'המסך רועד בפיצוץ'],
   ['bloom', '✨ זוהר', 'הילה זוהרת סביב אש ושמש (כבד יותר לטלפון)'],
 ];
 export const bsOpts = (() => {
-  const d = { topDown: false, smoke: true, fire: true, shake: true, bloom: true };
+  const d = { topDown: false, smoke: true, fire: true, shake: true, bloom: true, chase: true };
   try { return { ...d, ...JSON.parse(localStorage.getItem(OPT_KEY) || '{}') }; } catch { return d; }
 })();
 function saveOpts() {
@@ -62,7 +63,7 @@ export function renderBattleshipHud(v, ui) {
 
   let actions = '';
   if (placing) {
-    actions = `<div class="bs-hint">${ui.bsSel ? `נבחרה: <b>${nameOf(ui.bsSel)}</b> – לחצו על משבצת כדי להזיז אותה` : 'לחצו על ספינה כדי לבחור אותה, ואז על משבצת כדי להזיז'}</div>
+    actions = `<div class="bs-hint">${ui.bsSel ? `נבחרה: <b>${nameOf(ui.bsSel)}</b> – לחצו על משבצת כדי להזיז אותה` : 'גררו ספינה כדי להזיז אותה, או לחצו עליה ואז על משבצת'}</div>
       <div class="bs-btns">
         <button data-act="bsRandom">🎲 סידור אקראי</button>
         <button data-act="bsRotate" ${ui.bsSel ? '' : 'disabled'}>🔄 סובב</button>
@@ -163,6 +164,27 @@ function fire(ui) {
   setTimeout(() => { if (ui.bsBusy && !ui.bsAnimating) { ui.bsBusy = false; ctx.render(); } }, 4000); // safety
 }
 
+// ---------- dragging ships while placing ----------
+const placing = () => { const v = ctx.ui.view; return v?.phase === 'place' && !v.players[v.me].ready; };
+const canDrag = () => placing();
+const movedFleet = (type, x, y) => ctx.ui.bsFleet.map(s => (s.type === type ? { ...s, x, y } : { ...s }));
+function onShipDrag(type, x, y) {
+  play('tick');
+  return !validatePartial(movedFleet(type, x, y));
+}
+function onShipDrop(type, x, y, ok) {
+  const ui = ctx.ui;
+  if (ok) {
+    ui.bsFleet = movedFleet(type, x, y);
+    ui.bsSel = type;
+    play('place');
+    haptic('tap');
+  } else if (!(x === ui.bsFleet.find(s => s.type === type).x && y === ui.bsFleet.find(s => s.type === type).y)) {
+    nope(validatePartial(movedFleet(type, x, y)) === 'out' ? 'הספינה יוצאת מהלוח' : 'אי אפשר לשם – ספינות לא יכולות לגעת זו בזו');
+  }
+  ctx.render();
+}
+
 // ---------- taps in the 3D scene ----------
 function onShip(type) {
   const ui = ctx.ui, v = ui.view;
@@ -207,9 +229,9 @@ export function syncBattleship(v, ui) {
         stage.id = 'bs-stage';
         document.body.prepend(stage);
       }
-      loading = import('./battleship-3d.js?v=24').then(m => {
+      loading = import('./battleship-3d.js?v=25').then(m => {
         if (!m.webglAvailable()) { failed = true; ctx.render(); return; }
-        scene = new m.Battle3D(stage, { onCell, onShip });
+        scene = new m.Battle3D(stage, { onCell, onShip, canDrag, onShipDrag, onShipDrop });
         scene.setOptions(bsOpts);
         if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { __bsScene: scene, __bsUi: ctx.ui, __bsCell: onCell, __bsWave: m.waveHeight });
         syncBattleship(ctx.ui.view, ctx.ui);

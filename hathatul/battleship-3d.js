@@ -421,16 +421,20 @@ export function webglAvailable() {
 }
 
 export class Battle3D {
-  constructor(container, { onCell, onShip } = {}) {
+  constructor(container, { onCell, onShip, canDrag, onShipDrag, onShipDrop } = {}) {
     this.container = container;
     this.onCell = onCell;
     this.onShip = onShip;
+    this.canDrag = canDrag;       // () => may ships be dragged right now (placement)
+    this.onShipDrag = onShipDrag; // (type, x, y) => is that spot legal
+    this.onShipDrop = onShipDrop; // (type, x, y, ok)
     this.clock = new THREE.Clock();
     this.t = 0;
     this.fires = []; // persistent burning spots
     this.anims = []; // per-frame tweens: fn(dt) -> done?
     this.shakeAmt = 0;
-    this.opts = { smoke: true, fire: true, shake: true, bloom: true, topDown: false };
+    this.opts = { smoke: true, fire: true, shake: true, bloom: true, topDown: false, chase: true };
+    this.follow = null; // chase camera target while a missile flies
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -658,20 +662,85 @@ export class Battle3D {
   // ---------- input ----------
   bindInput() {
     const el = this.renderer.domElement;
-    let down = null;
-    el.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
-    el.addEventListener('pointerup', e => {
-      if (!down) return;
+    let down = null, drag = null;
+    el.addEventListener('pointerdown', e => {
+      down = { x: e.clientX, y: e.clientY };
+      // placing the fleet: grab a ship to drag it
+      if (this.canDrag?.()) {
+        const type = this.shipAt(e.clientX, e.clientY);
+        const c = type && this.cellAt(e.clientX, e.clientY);
+        if (c && c.grid === 'mine') {
+          const sp = this.ships.mine.get(type).spec;
+          drag = { type, sx: c.x, sy: c.y, ax: sp.x, ay: sp.y, nx: sp.x, ny: sp.y, ok: true, moved: false };
+          try { el.setPointerCapture(e.pointerId); } catch {}
+        }
+      }
+    });
+    el.addEventListener('pointermove', e => {
+      if (drag) {
+        if (!drag.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 10) return;
+        if (!drag.moved) { drag.moved = true; this.liftShip(drag.type, true); }
+        const c = this.cellAt(e.clientX, e.clientY);
+        if (!c || c.grid !== 'mine') return;
+        const nx = drag.ax + c.x - drag.sx, ny = drag.ay + c.y - drag.sy;
+        if (nx === drag.nx && ny === drag.ny) return;
+        drag.nx = nx; drag.ny = ny;
+        drag.ok = this.onShipDrag?.(drag.type, nx, ny) ?? true;
+        this.moveShipTo(drag.type, nx, ny, drag.ok);
+        return;
+      }
+      if (e.pointerType === 'mouse') this.hover = this.cellAt(e.clientX, e.clientY);
+    });
+    const up = e => {
+      if (drag && drag.moved) {
+        const d = drag;
+        drag = null; down = null;
+        this.liftShip(d.type, false);
+        this.onShipDrop?.(d.type, d.nx, d.ny, d.ok && (d.nx !== d.ax || d.ny !== d.ay));
+        return;
+      }
+      drag = null;
+      if (!down || e.type === 'pointercancel') { down = null; return; }
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       down = null;
       if (moved > 12) return;
       this.pick(e.clientX, e.clientY);
-    });
-    el.addEventListener('pointermove', e => {
-      if (e.pointerType !== 'mouse') return;
-      this.hover = this.cellAt(e.clientX, e.clientY);
-    });
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
     el.addEventListener('pointerleave', () => { this.hover = null; });
+  }
+
+  shipAt(cx, cy) {
+    const groups = [...this.ships.mine.values()].filter(s => !s.sunk).map(s => s.group);
+    const sh = this.ray(cx, cy).intersectObjects(groups, true)[0];
+    let o = sh?.object;
+    while (o && !o.userData.shipType) o = o.parent;
+    return o?.userData.shipType || null;
+  }
+
+  // While dragging: the ship floats a little above the water, tinted green (fits) or red.
+  liftShip(type, on) {
+    const e = this.ships.mine.get(type);
+    if (!e) return;
+    e.dragging = on;
+    this.tint(e, on ? 0x1fb36b : null);
+  }
+  tint(e, color) {
+    e.group.traverse(o => {
+      if (!o.isMesh) return;
+      for (const m of [].concat(o.material)) if (m.emissive) { m.emissive.set(color ?? 0x000000); m.emissiveIntensity = color ? 0.7 : 1; }
+    });
+  }
+  moveShipTo(type, x, y, ok) {
+    const e = this.ships.mine.get(type);
+    if (!e) return;
+    const s = { ...e.spec, x, y };
+    const g = GRIDS.mine;
+    e.base.set(g.ox + (s.dir === 'h' ? x + s.len / 2 : x + 0.5), 0, g.oz + (s.dir === 'h' ? y + 0.5 : y + s.len / 2));
+    e.group.position.x = e.base.x;
+    e.group.position.z = e.base.z;
+    this.tint(e, ok ? 0x1fb36b : 0xd4231a);
   }
 
   ray(cx, cy) {
@@ -694,13 +763,8 @@ export class Battle3D {
 
   pick(cx, cy) {
     // own ships first (to select them while placing)
-    const groups = [...this.ships.mine.values()].filter(s => !s.sunk).map(s => s.group);
-    const sh = this.ray(cx, cy).intersectObjects(groups, true)[0];
-    if (sh) {
-      let o = sh.object;
-      while (o && !o.userData.shipType) o = o.parent;
-      if (o && this.onShip?.(o.userData.shipType) !== false) return;
-    }
+    const type = this.shipAt(cx, cy);
+    if (type && this.onShip?.(type) !== false) return;
     const c = this.cellAt(cx, cy);
     if (c) this.onCell?.(c.grid, c.x, c.y);
   }
@@ -956,6 +1020,7 @@ export class Battle3D {
       g.add(flare);
       g.scale.setScalar(1.7);
       this.scene.add(g);
+      if (this.opts.chase) this.follow = { obj: g, to: to.clone(), dir: new THREE.Vector3(0, 0, -1) };
       const p0 = from.clone(), p2 = to.clone();
       const dist = p0.distanceTo(p2);
       const p1 = p0.clone().lerp(p2, 0.5);
@@ -972,12 +1037,13 @@ export class Battle3D {
         const ahead = curve.getPoint(Math.min(uu + 0.01, 1));
         g.position.copy(pos);
         g.lookAt(ahead);
+        if (this.follow?.obj === g && uu < 0.995) this.follow.dir.subVectors(ahead, pos).normalize();
         acc += dt;
         while (acc > 0.012) { // exhaust trail
           acc -= 0.012;
           const back = new THREE.Vector3(0, 0, -0.6).applyQuaternion(g.quaternion).add(pos);
           this.fireP.spawn({ pos: back, vel: { x: rand(-0.2, 0.2), y: rand(-0.2, 0.2), z: rand(-0.2, 0.2) }, life: 0.3, size: [0.8, 0.2], color: [C('#fff3c4'), C('#ff6a00')], alpha: [1, 0], drag: 1 });
-          this.smokeSpawn({ pos: back, vel: { x: rand(-0.15, 0.15), y: rand(0.05, 0.3), z: rand(-0.15, 0.15) }, life: rand(1.2, 2), size: [0.5, 1.8], color: [C('#e6e1dc'), C('#a39d98')], alpha: [0.6, 0], drag: 0.6 });
+          this.smokeSpawn({ pos: back, vel: { x: rand(-0.15, 0.15), y: rand(0.05, 0.3), z: rand(-0.15, 0.15) }, life: rand(1.2, 2), size: [0.35, 1.25], color: [C('#e6e1dc'), C('#a39d98')], alpha: [0.5, 0], drag: 0.6 });
         }
         if (k >= 1) {
           this.scene.remove(g);
@@ -986,6 +1052,14 @@ export class Battle3D {
         }
         return false;
       });
+    });
+  }
+
+  // Wait in scene time (follows the animation speed).
+  simWait(secs) {
+    return new Promise(res => {
+      let t = 0;
+      this.anims.push(dt => { t += dt; if (t >= secs) { res(); return true; } return false; });
     });
   }
 
@@ -1012,6 +1086,13 @@ export class Battle3D {
     else this.explosion(to.clone().setY(to.y + 0.2), result === 'sunk');
     this.addMarker(targetGrid, x, y, result === 'miss' ? 'miss' : 'hit');
     this.markers.get(`${targetGrid}:${x},${y}`).fresh = true;
+    if (this.follow) {
+      // chase camera: hold on the impact for a moment, then pull back to the board
+      this.follow.obj = null;
+      await this.simWait(result === 'miss' ? 0.9 : 1.3);
+      this.follow = null;
+      this.setView(this.view);
+    }
   }
 
   darken(e) {
@@ -1110,7 +1191,7 @@ export class Battle3D {
         const len = e.spec.len * 0.4;
         const hf = waveHeight(p.x + fwd.x * len, p.z + fwd.z * len, t), hb = waveHeight(p.x - fwd.x * len, p.z - fwd.z * len, t);
         const hs = waveHeight(p.x + side.x * 0.4, p.z + side.z * 0.4, t), hp = waveHeight(p.x - side.x * 0.4, p.z - side.z * 0.4, t);
-        p.y += ((e.spec.type === 'submarine' ? h + 0.02 : h + 0.09) - p.y) * Math.min(1, dt * 8);
+        p.y += ((e.dragging ? h + 0.5 : e.spec.type === 'submarine' ? h + 0.02 : h + 0.09) - p.y) * Math.min(1, dt * 8);
         e.group.rotation.z = Math.atan2(hf - hb, len * 2) * 0.8;
         e.group.rotation.x = Math.atan2(hs - hp, 0.8) * 0.8;
         if (e.group.userData.radar) e.group.userData.radar.rotation.y = t * 2.5;
@@ -1147,8 +1228,29 @@ export class Battle3D {
     for (const p of [this.fireP, this.smokeP, this.waterP]) p.update(dt);
     this.flash.intensity *= Math.pow(0.02, dt);
 
-    // camera: tween between presets, gentle idle drift, impact shake
-    if (this.camFrom) {
+    // camera: chase a missile, or tween between presets; gentle idle drift; impact shake
+    if (this.follow) {
+      const f = this.follow;
+      const flat = new THREE.Vector3(f.dir.x, 0, f.dir.z);
+      if (flat.lengthSq() < 1e-4) flat.set(0, 0, -1);
+      flat.normalize();
+      let wantPos, wantLook;
+      if (f.obj) { // behind and above the missile, looking ahead of it toward the target
+        const p = f.obj.position;
+        // horizontal offset only (a steeply climbing missile would otherwise drag the camera under
+        // the sea), and never lower than a couple of metres above the water
+        wantPos = p.clone().addScaledVector(flat, -4.2).add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(new THREE.Vector3(-flat.z, 0, flat.x), 0.9);
+        wantPos.y = Math.max(wantPos.y, 2.2);
+        wantLook = p.clone().addScaledVector(f.dir, 1.5).lerp(f.to, 0.4);
+      } else { // impact: a close, slightly raised view of the hit
+        wantPos = f.to.clone().addScaledVector(flat, -7).add(new THREE.Vector3(0, 4.6, 0));
+        wantLook = f.to.clone().add(new THREE.Vector3(0, 0.4, 0));
+      }
+      const k = 1 - Math.exp(-dt * (f.obj ? 6 : 3));
+      this.camPos.lerp(wantPos, k);
+      this.camLook.lerp(wantLook, k);
+      this.camFrom = null;
+    } else if (this.camFrom) {
       const c = this.camFrom;
       c.t += dt;
       const k = ease(Math.min(c.t / c.dur, 1));
