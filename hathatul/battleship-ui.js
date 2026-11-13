@@ -1,8 +1,8 @@
 // צוללות – HUD (DOM overlay) and controller between the game state and the 3D scene.
 
-import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=23';
-import { play, haptic } from './sfx.js?v=23';
-import { confetti } from './anim.js?v=23';
+import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=24';
+import { play, haptic } from './sfx.js?v=24';
+import { confetti } from './anim.js?v=24';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nameOf = type => FLEET.find(f => f.type === type).name;
@@ -207,11 +207,11 @@ export function syncBattleship(v, ui) {
         stage.id = 'bs-stage';
         document.body.prepend(stage);
       }
-      loading = import('./battleship-3d.js?v=23').then(m => {
+      loading = import('./battleship-3d.js?v=24').then(m => {
         if (!m.webglAvailable()) { failed = true; ctx.render(); return; }
         scene = new m.Battle3D(stage, { onCell, onShip });
         scene.setOptions(bsOpts);
-        if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { __bsScene: scene, __bsUi: ctx.ui, __bsCell: onCell });
+        if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { __bsScene: scene, __bsUi: ctx.ui, __bsCell: onCell, __bsWave: m.waveHeight });
         syncBattleship(ctx.ui.view, ctx.ui);
       }).catch(err => { console.error(err); failed = true; ctx.render(); });
     }

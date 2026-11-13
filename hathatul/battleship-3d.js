@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 const SIZE = 10;
 // Grid origins (top-left cell corner) in world space. The player's own waters are nearer the camera.
 const GRIDS = { enemy: { ox: -5, oz: -13 }, mine: { ox: -5, oz: 2 } };
-const GRID_Y = 0.32;
+const GRID_Y = 0.14; // just above the calmed waves, below the ships' decks
 const WRECK_Y = -0.12; // how low a sunk ship rests (deck just above the water)
 const SUN_DIR = new THREE.Vector3(-0.35, 0.22, -1).normalize();
 
@@ -24,12 +24,26 @@ const WAVES = [
   [0.25, -0.9, 0.035, 2.6],
 ];
 const TIME_SCALE = 0.55;
-function waveHeight(x, z, t) {
+// The sea is calmer over the two boards (so ships aren't swamped by crests) and rougher
+// around them. Same function in the shader below.
+const CALM = 0.4, FEATHER = 2;
+const smooth = (a, b, x) => { const k = Math.min(Math.max((x - a) / (b - a), 0), 1); return k * k * (3 - 2 * k); };
+function calm(x, z) {
+  let inside = 0;
+  for (const g of Object.values(GRIDS)) {
+    const r = smooth(g.ox - FEATHER, g.ox, x) * (1 - smooth(g.ox + 10, g.ox + 10 + FEATHER, x))
+      * smooth(g.oz - FEATHER, g.oz, z) * (1 - smooth(g.oz + 10, g.oz + 10 + FEATHER, z));
+    inside = Math.max(inside, r);
+  }
+  return 1 - (1 - CALM) * inside;
+}
+export function waveHeight(x, z, t) {
+  const amp = calm(x, z);
   let y = 0;
   for (const [dx, dz, s, len] of WAVES) {
     const k = (2 * Math.PI) / len, c = Math.sqrt(9.8 / k), l = Math.hypot(dx, dz);
     const f = k * ((dx / l) * x + (dz / l) * z - c * t * TIME_SCALE);
-    y += (s / k) * Math.sin(f);
+    y += (s * amp / k) * Math.sin(f);
   }
   return y;
 }
@@ -41,6 +55,12 @@ varying vec3 vNormal;
 varying float vHeight;
 const int N = ${WAVES.length};
 uniform vec4 uWaves[N];
+uniform vec4 uGrids[2]; // ox, oz of each board
+float boardMask(vec2 p, vec4 g) {
+  float f = ${FEATHER.toFixed(1)};
+  return smoothstep(g.x - f, g.x, p.x) * (1.0 - smoothstep(g.x + 10.0, g.x + 10.0 + f, p.x))
+       * smoothstep(g.y - f, g.y, p.y) * (1.0 - smoothstep(g.y + 10.0, g.y + 10.0 + f, p.y));
+}
 vec3 gerstner(vec4 w, vec3 p, inout vec3 tangent, inout vec3 binormal) {
   float k = 6.2831853 / w.w;
   float c = sqrt(9.8 / k);
@@ -56,7 +76,8 @@ void main() {
   vec3 tangent = vec3(1.0, 0.0, 0.0);
   vec3 binormal = vec3(0.0, 0.0, 1.0);
   vec3 q = p;
-  for (int i = 0; i < N; i++) q += gerstner(uWaves[i], p, tangent, binormal);
+  float amp = 1.0 - (1.0 - ${CALM.toFixed(2)}) * max(boardMask(p.xz, uGrids[0]), boardMask(p.xz, uGrids[1]));
+  for (int i = 0; i < N; i++) { vec4 w = uWaves[i]; w.z *= amp; q += gerstner(w, p, tangent, binormal); }
   vNormal = normalize(cross(binormal, tangent));
   vWorld = q;
   vHeight = q.y;
@@ -439,6 +460,7 @@ export class Battle3D {
       uniforms: {
         uTime: { value: 0 },
         uWaves: { value: WAVES.map(w => new THREE.Vector4(...w)) },
+        uGrids: { value: Object.values(GRIDS).map(g => new THREE.Vector4(g.ox, g.oz, 0, 0)) },
         uDeep: { value: C('#062033') }, uShallow: { value: C('#17607d') }, uSky: { value: C('#b98a7c') },
         uSunDir: { value: SUN_DIR }, uSunColor: { value: C('#ffd7a0') }, uFog: { value: fogColor },
         uFogNear: { value: 25 }, uFogFar: { value: 110 },
@@ -1088,7 +1110,7 @@ export class Battle3D {
         const len = e.spec.len * 0.4;
         const hf = waveHeight(p.x + fwd.x * len, p.z + fwd.z * len, t), hb = waveHeight(p.x - fwd.x * len, p.z - fwd.z * len, t);
         const hs = waveHeight(p.x + side.x * 0.4, p.z + side.z * 0.4, t), hp = waveHeight(p.x - side.x * 0.4, p.z - side.z * 0.4, t);
-        p.y += ((e.spec.type === 'submarine' ? h - 0.08 : h + 0.02) - p.y) * Math.min(1, dt * 8);
+        p.y += ((e.spec.type === 'submarine' ? h + 0.02 : h + 0.09) - p.y) * Math.min(1, dt * 8);
         e.group.rotation.z = Math.atan2(hf - hb, len * 2) * 0.8;
         e.group.rotation.x = Math.atan2(hs - hp, 0.8) * 0.8;
         if (e.group.userData.radar) e.group.userData.radar.rotation.y = t * 2.5;

@@ -3,7 +3,7 @@
 // the players take turns firing one shot each. A ship sinks when all its cells are hit; the
 // first to sink the whole enemy fleet wins.
 
-import { shuffle, fairOrder } from './util.js?v=23';
+import { shuffle, fairOrder } from './util.js?v=24';
 
 export const SIZE = 10;
 export const FLEET = [
