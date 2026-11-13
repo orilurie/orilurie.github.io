@@ -1,18 +1,21 @@
-import * as Hathatul from './game.js?v=21';
-import * as Quartets from './quartets.js?v=21';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=21';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=21';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=21';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=21';
+import * as Hathatul from './game.js?v=22';
+import * as Quartets from './quartets.js?v=22';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=22';
+import * as Battleship from './battleship.js?v=22';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=22';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=22';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=22';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=22';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
 const GAMES = {
   hathatul: { rules: Hathatul, name: 'חתחתול', icon: '🐱', blurb: 'שמרו את החתולים, היפטרו מהעכברים!' },
   quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
+  battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 21; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 22; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -200,6 +203,9 @@ function startTestRoom(n) {
     const { action } = msg;
     const res = applyAction(game, game.players[game.turn].id, action);
     if (res.error) return receive({ t: 'error', text: res.error });
+    if (type === 'battleship' && action.type === 'place') {
+      for (const p of game.players) if (!p.ready) applyAction(game, p.id, { type: 'place', ships: Battleship.randomFleet() });
+    }
     if (game.phase === 'peek') readyAll();
     push();
   };
@@ -291,6 +297,7 @@ function receive(msg) {
       ui.lastEventId = 0; // in the lobby: animate everything from the first deal
     }
     if (fresh.some(e => e.type === 'roundEnd' || e.type === 'end')) ui.resultsReady = false;
+    if (msg.room.type === 'battleship' && msg.view) prepareBattleshipEvents(fresh, msg.view);
     ui.room = msg.room;
     const prevTurnKey = ui.view && `${ui.view.round}-${ui.view.turn}-${ui.view.pending?.type}`;
     ui.view = msg.view;
@@ -327,7 +334,7 @@ function receive(msg) {
 function animate(fresh, before, prev) {
   const v = ui.view;
   const myTurn = x => x && x.phase === 'play' && x.turn === x.me;
-  const play_ = v.type === 'quartets' ? playQuartetEvents : playEvents;
+  const play_ = v.type === 'quartets' ? playQuartetEvents : v.type === 'battleship' ? playBattleshipEvents : playEvents;
   play_(fresh, before, v).catch(() => {}).then(() => {
     if (fresh.some(e => e.type === 'roundEnd' || e.type === 'end')) {
       ui.resultsReady = true;
@@ -403,6 +410,8 @@ function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) 
 function render() {
   if (drag?.started) { ui.renderQueued = true; return; }
   $app.classList.toggle('game', ui.screen === 'game');
+  $app.classList.remove('bs');
+  document.body.classList.remove('bs-on');
   keepAwake();
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting') {
@@ -411,7 +420,15 @@ function render() {
     return;
   }
   if (ui.screen === 'lobby') return renderLobby();
-  if (ui.room.type === 'quartets') {
+  if (ui.room.type === 'battleship') {
+    ui.headerButtons = headerButtons();
+    ui.emojiBar = emojiBar();
+    $app.innerHTML = renderBattleshipHud(ui.view, ui);
+    $app.classList.add('bs');
+    document.body.classList.add('bs-on');
+    syncBattleship(ui.view, ui);
+    return;
+  } else if (ui.room.type === 'quartets') {
     ui.headerButtons = headerButtons();
     ui.emojiBar = emojiBar();
     $app.innerHTML = renderQuartets(ui.view, ui);
@@ -426,18 +443,18 @@ const headerButtons = () => `
   ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
   <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
   <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
-  ${ui.room.test && ui.room.type !== 'quartets' ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}`;
+  ${ui.room.test && ui.room.type === 'hathatul' ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}`;
 const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>`;
 
 function renderHome() {
   $app.innerHTML = `
     <div class="panel home">
-      <h1>${GAMES[ui.gameType].name} <span>${ui.gameType === 'quartets' ? '🃏♥️' : '🐱🐭'}</span></h1>
+      <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥' }[ui.gameType] || '🐱🐭'}</span></h1>
       <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
         ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
           <span class="gc-icon">${g.icon}</span><b>${g.name}</b></button>`).join('')}
       </div>
-      <p class="sub">משחק קלפים אונליין ל-2 עד 6 שחקנים. ${GAMES[ui.gameType].blurb}</p>
+      <p class="sub">${ui.gameType === 'battleship' ? 'משחק אונליין לשני שחקנים.' : 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
       <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
       <button class="primary" data-act="create">צור חדר ${GAMES[ui.gameType].name}</button>
@@ -449,11 +466,11 @@ function renderHome() {
       ${debugOn ? `<div class="or">או</div>
       <div class="row test-row">
         <button data-act="test">🧪 חדר בדיקה</button>
-        <select id="testN" aria-label="מספר שחקנים">${[2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
+        <select id="testN" aria-label="מספר שחקנים">${(ui.gameType === 'battleship' ? [2] : [2, 3, 4, 5, 6]).map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
       ${installHtml()}
-      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${ui.gameType === 'quartets' ? quartetsRulesHtml() : rulesHtml()}</details>
+      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${ui.gameType === 'quartets' ? quartetsRulesHtml() : ui.gameType === 'battleship' ? battleshipRulesHtml() : rulesHtml()}</details>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
@@ -930,6 +947,9 @@ function onAct(el) {
     }
     case 'exitTest': location.href = homeUrl(); return;
     case 'toggleLog': ui.showLog = !ui.showLog; return render();
+    case 'bsRandom': case 'bsRotate': case 'bsReady': case 'bsFire': case 'bsView':
+      if (battleshipAct(act, ui)) render();
+      return;
     case 'pickGame':
       ui.gameType = el.dataset.g;
       store.set('hathatul-game', ui.gameType);
@@ -983,4 +1003,5 @@ $app.addEventListener('keydown', e => {
   }
 });
 
+initBattleship({ render: () => render(), send: m => send(m), toast: t => toast(t), ui });
 render();

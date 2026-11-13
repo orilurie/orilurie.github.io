@@ -112,6 +112,14 @@ const SOUNDS = {
   pop: () => tone({ freq: 500, to: 1100, type: 'sine', dur: 0.1, vol: 0.2 }),
   nope: () => tone({ freq: 220, to: 160, type: 'square', dur: 0.12, vol: 0.08 }),
   shuffle: () => { for (let i = 0; i < 6; i++) noise({ dur: 0.05, vol: 0.18, at: i * 0.05, from: 2500, to: 1500, q: 2 }); },
+  // sea battle
+  launch: () => { noise({ dur: 0.9, vol: 0.35, from: 300, to: 2400, q: 0.7 }); tone({ freq: 90, to: 160, type: 'sawtooth', dur: 0.7, vol: 0.06 }); },
+  boom: () => { noise({ dur: 1.2, vol: 0.6, from: 900, to: 60, q: 0.6 }); tone({ freq: 70, to: 30, type: 'sine', dur: 0.9, vol: 0.5, attack: 0.01 }); },
+  bigboom: () => { noise({ dur: 1.8, vol: 0.7, from: 700, to: 40, q: 0.5 }); tone({ freq: 60, to: 25, type: 'sine', dur: 1.4, vol: 0.6, attack: 0.01 }); noise({ dur: 0.9, vol: 0.3, at: 0.35, from: 400, to: 80, q: 0.8 }); },
+  splash: () => { noise({ dur: 0.7, vol: 0.4, from: 2200, to: 300, q: 0.9 }); noise({ dur: 0.5, vol: 0.2, at: 0.15, from: 1200, to: 500, q: 1.5 }); },
+  sonar: () => { tone({ freq: 1180, type: 'sine', dur: 0.9, vol: 0.12, attack: 0.01 }); tone({ freq: 1180, type: 'sine', dur: 0.7, vol: 0.04, at: 0.45, attack: 0.01 }); },
+  sink: () => { tone({ freq: 220, to: 55, type: 'triangle', dur: 2.2, vol: 0.18 }); for (let i = 0; i < 8; i++) tone({ freq: 500 + Math.random() * 700, to: 900 + Math.random() * 600, type: 'sine', dur: 0.08, vol: 0.05, at: 0.4 + i * 0.18 }); },
+  aim: () => tone({ freq: 1600, type: 'square', dur: 0.04, vol: 0.05 }),
 };
 
 export function play(name) {
