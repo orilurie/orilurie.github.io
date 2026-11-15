@@ -1,11 +1,13 @@
-import * as Hathatul from './game.js?v=25';
-import * as Quartets from './quartets.js?v=25';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=25';
-import * as Battleship from './battleship.js?v=25';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=25';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=25';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=25';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=25';
+import * as Hathatul from './game.js?v=26';
+import * as Quartets from './quartets.js?v=26';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=26';
+import * as Battleship from './battleship.js?v=26';
+import * as Imposter from './imposter.js?v=26';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=26';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=26';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=26';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=26';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=26';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -13,9 +15,10 @@ const GAMES = {
   hathatul: { rules: Hathatul, name: 'חתחתול', icon: '🐱', blurb: 'שמרו את החתולים, היפטרו מהעכברים!' },
   quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
   battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
+  imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 25; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 26; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -125,7 +128,7 @@ function startHosting(code) {
     if (msg.t === 'start') {
       if (!isHost || room.game) return;
       if (room.players.length < rules.MIN_PLAYERS) return reply(cid, `צריך לפחות ${rules.MIN_PLAYERS} שחקנים`);
-      room.game = rules.createGame(room.players.map(x => ({ id: x.pid, name: x.name })));
+      room.game = rules.createGame(room.players.map(x => ({ id: x.pid, name: x.name })), Math.random, { used: loadUsedWords() });
       return broadcast();
     }
     if (msg.t === 'emoji' && room.game) {
@@ -137,9 +140,10 @@ function startHosting(code) {
       return;
     }
     if (msg.t === 'action' && room.game) {
-      if (msg.action.type === 'nextRound' && !isHost) return;
+      if ((rules.HOST_ACTIONS || ['nextRound']).includes(msg.action.type) && !isHost) return reply(cid, 'רק המארח/ת יכול/ה לעשות את זה');
       const res = rules.applyAction(room.game, p.pid, msg.action);
       if (res.error) return reply(cid, res.error);
+      if (room.type === 'imposter') saveUsedWords(room.game.used);
       for (const pr of res.privates) sendTo(room.players.find(x => x.pid === pr.to), pr.msg);
       broadcast();
     }
@@ -176,6 +180,12 @@ function startHosting(code) {
   send = msg => handle('self', msg);
 }
 
+// המתחזה: the words already played are remembered on the host's device, so the same word
+// doesn't come back next evening either.
+const USED_KEY = 'hathatul-im-used';
+function loadUsedWords() { try { return JSON.parse(localStorage.getItem(USED_KEY) || '[]'); } catch { return []; } }
+function saveUsedWords(used) { try { localStorage.setItem(USED_KEY, JSON.stringify(used.slice(-1500))); } catch {} }
+
 // ---------- Test room ----------
 // One person plays every seat, all cards face up. No network: the screen always shows the
 // seat whose turn it is, so the normal controls act for that player.
@@ -184,7 +194,7 @@ function startTestRoom(n) {
   const ids = [pid, ...names.slice(1).map((_, i) => `test${i + 2}`)];
   const type = ui.gameType;
   const { createGame, applyAction, viewFor } = GAMES[type].rules;
-  const game = createGame(ids.map((id, i) => ({ id, name: names[i] })));
+  const game = createGame(ids.map((id, i) => ({ id, name: names[i] })), Math.random, { used: type === 'imposter' ? loadUsedWords() : [] });
   const room = {
     code: 'TEST', type, started: true, isHost: true, test: true,
     players: names.map((name, i) => ({ name, connected: true, isHost: i === 0 })),
@@ -334,7 +344,7 @@ function receive(msg) {
 function animate(fresh, before, prev) {
   const v = ui.view;
   const myTurn = x => x && x.phase === 'play' && x.turn === x.me;
-  const play_ = v.type === 'quartets' ? playQuartetEvents : v.type === 'battleship' ? playBattleshipEvents : playEvents;
+  const play_ = { quartets: playQuartetEvents, battleship: playBattleshipEvents, imposter: playImposterEvents }[v.type] || playEvents;
   play_(fresh, before, v).catch(() => {}).then(() => {
     if (fresh.some(e => e.type === 'roundEnd' || e.type === 'end')) {
       ui.resultsReady = true;
@@ -428,6 +438,16 @@ function render() {
     document.body.classList.add('bs-on');
     syncBattleship(ui.view, ui);
     return;
+  } else if (ui.room.type === 'imposter') {
+    ui.headerButtons = headerButtons();
+    ui.emojiBar = emojiBar();
+    // keep a half-typed clue (and focus) across re-renders caused by other players' updates
+    const input = document.getElementById('imClue');
+    const typed = input?.value, focused = input && document.activeElement === input;
+    $app.innerHTML = renderImposter(ui.view, ui);
+    const again = document.getElementById('imClue');
+    if (again && typed) again.value = typed;
+    if (again && focused) again.focus();
   } else if (ui.room.type === 'quartets') {
     ui.headerButtons = headerButtons();
     ui.emojiBar = emojiBar();
@@ -449,12 +469,12 @@ const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגוב
 function renderHome() {
   $app.innerHTML = `
     <div class="panel home">
-      <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥' }[ui.gameType] || '🐱🐭'}</span></h1>
+      <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥', imposter: '🕵️🤫' }[ui.gameType] || '🐱🐭'}</span></h1>
       <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
         ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
           <span class="gc-icon">${g.icon}</span><b>${g.name}</b></button>`).join('')}
       </div>
-      <p class="sub">${ui.gameType === 'battleship' ? 'משחק אונליין לשני שחקנים.' : 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>
+      <p class="sub">${{ battleship: 'משחק אונליין לשני שחקנים.', imposter: 'משחק מילים אונליין ל-3 עד 6 שחקנים.' }[ui.gameType] || 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
       <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
       <button class="primary" data-act="create">צור חדר ${GAMES[ui.gameType].name}</button>
@@ -466,11 +486,11 @@ function renderHome() {
       ${debugOn ? `<div class="or">או</div>
       <div class="row test-row">
         <button data-act="test">🧪 חדר בדיקה</button>
-        <select id="testN" aria-label="מספר שחקנים">${(ui.gameType === 'battleship' ? [2] : [2, 3, 4, 5, 6]).map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
+        <select id="testN" aria-label="מספר שחקנים">${({ battleship: [2], imposter: [3, 4, 5, 6] }[ui.gameType] || [2, 3, 4, 5, 6]).map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
       ${installHtml()}
-      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${ui.gameType === 'quartets' ? quartetsRulesHtml() : ui.gameType === 'battleship' ? battleshipRulesHtml() : rulesHtml()}</details>
+      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${{ quartets: quartetsRulesHtml, battleship: battleshipRulesHtml, imposter: imposterRulesHtml }[ui.gameType]?.() || rulesHtml()}</details>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
@@ -514,8 +534,8 @@ function renderLobby() {
       <h3>שחקנים (${r.players.length}/${GAMES[r.type]?.rules.MAX_PLAYERS || MAX_PLAYERS})</h3>
       <ul class="plist">${r.players.map(p => `<li>${p.isHost ? '👑 ' : '🐱 '}${esc(p.name)}</li>`).join('')}</ul>
       ${r.isHost
-        ? `<button class="primary" data-act="start" ${r.players.length < MIN_PLAYERS ? 'disabled' : ''}>התחל ${GAMES[r.type]?.name || 'משחק'}</button>
-           ${r.players.length < MIN_PLAYERS ? `<p class="sub">מחכים לשחקנים נוספים…</p>` : ''}`
+        ? `<button class="primary" data-act="start" ${r.players.length < (GAMES[r.type]?.rules.MIN_PLAYERS || MIN_PLAYERS) ? 'disabled' : ''}>התחל ${GAMES[r.type]?.name || 'משחק'}</button>
+           ${r.players.length < (GAMES[r.type]?.rules.MIN_PLAYERS || MIN_PLAYERS) ? `<p class="sub">מחכים לשחקנים נוספים… (צריך לפחות ${GAMES[r.type]?.rules.MIN_PLAYERS || MIN_PLAYERS})</p>` : ''}`
         : `<p class="sub">מחכים שהמארח/ת יתחיל/ה את המשחק…</p>`}
       <p class="hint">המארח/ת צריך/ה להשאיר את הדף פתוח לאורך כל המשחק.</p>
     </div>`;
@@ -951,6 +971,10 @@ function onAct(el) {
     case 'bsTopDown': case 'bsSettings': case 'bsOpt':
       if (battleshipAct(act, ui, el)) render();
       return;
+    case 'imPeek': case 'imSet': case 'imStart': case 'imNext': case 'imSettings': case 'imSeen': case 'imClue':
+    case 'imSpoken': case 'imSkip': case 'imPick': case 'imVote': case 'imClose': case 'imGuess': case 'imSkipGuess':
+      if (imposterAct(act, el, ui, send)) render();
+      return;
     case 'pickGame':
       ui.gameType = el.dataset.g;
       store.set('hathatul-game', ui.gameType);
@@ -996,7 +1020,9 @@ $app.addEventListener('click', e => {
   if (el && !el.disabled) onAct(el);
 });
 $app.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.matches('#code, #name')) {
+  if (e.key === 'Enter' && e.target.id === 'imClue') {
+    onAct({ dataset: { act: 'imClue' } });
+  } else if (e.key === 'Enter' && e.target.matches('#code, #name')) {
     onAct({ dataset: { act: e.target.id === 'code' || ui.joinCode ? 'join' : 'create' } });
   } else if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card[data-act], .qgroup[data-act], .qopp[data-act]')) {
     e.preventDefault();
