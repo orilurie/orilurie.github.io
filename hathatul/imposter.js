@@ -3,8 +3,8 @@
 // give one clue each in turn, then vote for who they think the imposter is. A caught imposter
 // gets a last chance: guess the word from 8 options.
 
-import { shuffle, fairOrder } from './util.js?v=28';
-import { WORDS } from './imposter-words.js?v=28';
+import { shuffle, fairOrder } from './util.js?v=29';
+import { WORDS } from './imposter-words.js?v=29';
 
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 6;
@@ -50,7 +50,7 @@ export function createGame(players, rnd = Math.random, { used = [] } = {}) {
     rnd,
     round: 0,
     players: players.map(p => ({ id: p.id, name: p.name, score: 0, timesImposter: 0 })),
-    settings: { imposters: 1, clueRounds: 1 },
+    settings: { imposters: 1, clueRounds: 1, hint: true },
     used: used.filter(i => Number.isInteger(i) && i >= 0 && i < WORDS.length),
     phase: 'setup',
     turn: 0,
@@ -113,6 +113,7 @@ function newRound(state) {
   for (const i of state.imposters) state.players[i].timesImposter++;
   // each imposter gets a different hint, so two imposters can't recognise each other by it
   const hintOrder = shuffle([0, 1, 2, 3, 4], state.rnd);
+  state.hintOn = state.settings.hint !== false;
   state.hints = Object.fromEntries(state.imposters.map((pi, j) => [pi, hintOrder[j]]));
   // speaking order: the fair rotation; if an imposter would open, usually let a regular player start
   let order = fairOrder(state);
@@ -231,6 +232,7 @@ export function applyAction(state, playerId, action) {
       const imp = Number(action.imposters), cr = Number(action.clueRounds);
       if (imp) state.settings.imposters = Math.max(1, Math.min(imp, maxImposters(n)));
       if (cr) state.settings.clueRounds = Math.max(1, Math.min(cr, 3));
+      if (typeof action.hint === 'boolean') state.settings.hint = action.hint;
       return ok;
     }
     case 'toSetup': // host: back to the settings between rounds
@@ -344,7 +346,7 @@ export function viewFor(state, playerId, { revealAll = false } = {}) {
     role: state.phase === 'setup' ? null : isImposter ? 'imposter' : 'citizen',
     word: !word ? null : (!isImposter || show) ? word.w : null,
     category: word && (!isImposter || show) ? word.c : null,
-    hint: isImposter && word ? word.h[state.hints[me]] : null,
+    hint: isImposter && word && state.hintOn ? word.h[state.hints[me]] : null,
     clues: state.clues || [],
     clueTurns: state.order ? totalTurns(state) : 0,
     revote: state.revote ? { among: state.revote.among, slots: state.revote.slots } : null,
@@ -353,7 +355,7 @@ export function viewFor(state, playerId, { revealAll = false } = {}) {
     options: state.phase === 'guess' && state.accused.includes(me) && isImposter && !state.guesses[me] ? state.options : null,
     // full reveal at the end of the round (or in the test room)
     imposters: show ? state.imposters : null,
-    hints: show ? Object.fromEntries(Object.entries(state.hints || {}).map(([pi, h]) => [pi, word.h[h]])) : null,
+    hints: show && state.hintOn ? Object.fromEntries(Object.entries(state.hints || {}).map(([pi, h]) => [pi, word.h[h]])) : null,
     votes: done ? state.allVotes : null,
     guesses: done ? state.guesses : null,
     result: done ? state.result : null,

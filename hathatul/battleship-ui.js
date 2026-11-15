@@ -1,8 +1,8 @@
 // צוללות – HUD (DOM overlay) and controller between the game state and the 3D scene.
 
-import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=28';
-import { play, haptic } from './sfx.js?v=28';
-import { confetti } from './anim.js?v=28';
+import { FLEET, SIZE, cellName, randomFleet, validatePartial } from './battleship.js?v=29';
+import { play, haptic } from './sfx.js?v=29';
+import { confetti } from './anim.js?v=29';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nameOf = type => FLEET.find(f => f.type === type).name;
@@ -229,7 +229,7 @@ export function syncBattleship(v, ui) {
         stage.id = 'bs-stage';
         document.body.prepend(stage);
       }
-      loading = import('./battleship-3d.js?v=28').then(m => {
+      loading = import('./battleship-3d.js?v=29').then(m => {
         if (!m.webglAvailable()) { failed = true; ctx.render(); return; }
         scene = new m.Battle3D(stage, { onCell, onShip, canDrag, onShipDrag, onShipDrop });
         scene.setOptions(bsOpts);

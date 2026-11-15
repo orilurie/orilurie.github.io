@@ -1,12 +1,12 @@
 // המתחזה – screens and interactions. Rendering is driven by app.js.
 
-import { play, haptic } from './sfx.js?v=28';
-import { confetti } from './anim.js?v=28';
+import { play, haptic } from './sfx.js?v=29';
+import { confetti } from './anim.js?v=29';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export const imposterRulesHtml = () => `<ul>
-  <li>3 עד 6 שחקנים. כולם מקבלים את אותה מילה סודית – חוץ מהמתחזה (או שניים, מ-5 שחקנים), שמקבל רק רמז.</li>
+  <li>3 עד 6 שחקנים. כולם מקבלים את אותה מילה סודית – חוץ מהמתחזה (או שניים, מ-5 שחקנים), שמקבל רק רמז (אפשר לכבות את הרמז בהגדרות).</li>
   <li>כל אחד בתורו אומר מילה אחת שקשורה למילה הסודית. לא קל מדי – כדי שהמתחזה לא יבין, ולא קשה מדי – כדי שלא יחשדו בכם.</li>
   <li>אחרי סבב הרמזים כולם מצביעים: מי המתחזה?</li>
   <li>מתחזה שלא נתפס מקבל 3 נקודות. מתחזה שנתפס מקבל הזדמנות אחרונה לנחש את המילה מתוך 8 אפשרויות – ניחוש נכון שווה 2 נקודות.</li>
@@ -30,7 +30,7 @@ function secretCard(v, ui) {
   const front = v.role === 'imposter'
     ? `<div class="im-role imp">🕵️ אתה המתחזה!</div>
        <div class="im-sub">${v.k === 2 ? 'יש עוד מתחזה אחד – אבל לא תדעו מי.' : 'כולם יודעים את המילה – חוץ ממך.'}</div>
-       <div class="im-hintlabel">הרמז שלך:</div><div class="im-word">${esc(v.hint)}</div>`
+       ${v.hint ? `<div class="im-hintlabel">הרמז שלך:</div><div class="im-word">${esc(v.hint)}</div>` : '<div class="im-hintlabel">אין רמז בסבב הזה – הקשיבו לאחרים ונסו להשתלב 🤐</div>'}`
     : `<div class="im-role cit">המילה הסודית</div>
        <div class="im-word">${esc(v.word)}</div>
        <div class="im-sub">קטגוריה: ${esc(v.category)}</div>`;
@@ -57,6 +57,8 @@ export function renderImposter(v, ui) {
           ${v.maxImposters < 2 ? '<p class="hint">שני מתחזים אפשר מ-5 שחקנים.</p>' : ''}
           <div class="im-setting"><span>סבבי רמזים</span>
             <div class="im-seg">${[1, 2, 3].map(k => `<button class="${v.settings.clueRounds === k ? 'on' : ''}" data-act="imSet" data-rounds="${k}">${k}</button>`).join('')}</div></div>
+          <div class="im-setting"><span>רמז למתחזה</span>
+            <div class="im-seg">${[[true, 'דולק'], [false, 'כבוי']].map(([k, t]) => `<button class="${(v.settings.hint !== false) === k ? 'on' : ''}" data-act="imSet" data-hint="${k ? 1 : 0}">${t}</button>`).join('')}</div></div>
           <button class="primary im-big" data-act="imStart">🕵️ התחילו!</button>
         </div>`
       : `<div class="panel im-panel center"><div class="spinner"></div><p>המארח/ת בוחר/ת הגדרות…</p></div>`;
@@ -97,7 +99,7 @@ export function renderImposter(v, ui) {
     const caughtNames = v.accused.map(i => esc(v.players[i].name)).join(' ו');
     body = v.options
       ? `<div class="im-status mine">😱 נתפסת! הזדמנות אחרונה: מה המילה הסודית?</div>
-         <div class="im-hintbox">הרמז שלך היה: <b>${esc(v.hint)}</b></div>
+         ${v.hint ? `<div class="im-hintbox">הרמז שלך היה: <b>${esc(v.hint)}</b></div>` : ''}
          <div class="im-options">${v.options.map(w => `<button data-act="imGuess" data-w="${esc(w)}">${esc(w)}</button>`).join('')}</div>`
       : `<div class="im-status">🔍 ${caughtNames} נחשד/ה – ומנסה לנחש את המילה…</div>${cluesBoard(v, -1)}
          ${isHost ? '<button class="ghost im-skip" data-act="imSkipGuess">לדלג על הניחוש</button>' : ''}`;
@@ -129,7 +131,7 @@ function cluesBoard(v, speaker) {
 function resultHtml(v, isHost) {
   const r = v.result;
   const [title, sub] = outcomeText[r.outcome];
-  const imps = v.imposters.map(i => `<div class="im-reveal-imp"><b>🕵️ ${esc(v.players[i].name)}</b> <span>רמז: ${esc(v.hints[i])}</span>${v.guesses[i] ? ` <span>ניחוש: ${esc(v.guesses[i])} ${v.guesses[i] === v.word ? '✅' : '❌'}</span>` : ''}</div>`).join('');
+  const imps = v.imposters.map(i => `<div class="im-reveal-imp"><b>🕵️ ${esc(v.players[i].name)}</b> ${v.hints ? `<span>רמז: ${esc(v.hints[i])}</span>` : ''}${v.guesses[i] ? ` <span>ניחוש: ${esc(v.guesses[i])} ${v.guesses[i] === v.word ? '✅' : '❌'}</span>` : ''}</div>`).join('');
   const votes = v.players.map((p, i) => {
     const ts = v.votes?.[i] || [];
     return `<tr><td>${esc(p.name)}</td><td>${ts.map(t => `${esc(v.players[t].name)}${v.imposters.includes(t) ? ' ✓' : ''}`).join(', ') || '–'}</td><td class="${r.deltas[i] ? 'plus' : ''}">${r.deltas[i] ? '+' + r.deltas[i] : '0'}</td></tr>`;
@@ -154,6 +156,7 @@ export function imposterAct(act, el, ui, send) {
     case 'imSet':
       if (el.dataset.imposters) A('settings', { imposters: Number(el.dataset.imposters) });
       if (el.dataset.rounds) A('settings', { clueRounds: Number(el.dataset.rounds) });
+      if (el.dataset.hint) A('settings', { hint: el.dataset.hint === '1' });
       return false;
     case 'imStart': A('start'); return false;
     case 'imNext': A('nextRound'); return false;
