@@ -1,7 +1,7 @@
 // זירה – recorded sound effects (CC0, see sounds/CREDITS.txt) with simple positional audio:
 // sounds from far away are quieter and duller, and pan left/right by where they happen.
 
-import { settings } from './sfx.js?v=37';
+import { settings } from './sfx.js?v=38';
 
 // Which pistol shot to use: picked on sounds.html (saved per device), default 3.
 export function gunChoice() {
