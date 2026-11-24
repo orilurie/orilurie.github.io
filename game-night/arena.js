@@ -5,15 +5,15 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=41';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=41';
-import * as gfx from './arena-gfx.js?v=41';
-import { sound } from './arena-audio.js?v=41';
+} from './arena-core.js?v=42';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=42';
+import * as gfx from './arena-gfx.js?v=42';
+import { sound } from './arena-audio.js?v=42';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 41;
+export const VERSION = 42;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -366,7 +366,7 @@ function stepLocal(dt) {
 
   // predicted bullets
   myBullets = myBullets.filter(b => {
-    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); sound('wall', heardAt(b.x, b.y)); holes.push({ x: b.x - b.vx * 0.006, y: b.y - b.vy * 0.006, life: 6 }); if (holes.length > 60) holes.shift(); return false; }
+    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); particles.push({ x: b.x, y: b.y, vx: 0, vy: 0, life: 0.18, max: 0.18, color: '#ffd98a', size: 46, sprite: 'spark_05', rot: Math.random() * 6, add: true, alpha: 1 }); sound('wall', heardAt(b.x, b.y)); holes.push({ x: b.x - b.vx * 0.006, y: b.y - b.vy * 0.006, life: 6 }); if (holes.length > 60) holes.shift(); return false; }
     for (const o of others) {
       if (!o.alive || o.id === myId) continue;
       if (Math.hypot(o.x - b.x, o.y - b.y) < R + BULLET_R) {
@@ -571,7 +571,7 @@ function drawWorld(now, dt) {
     if (owner === myId) continue;
     drawBullet(x + vx * age, y + vy * age, vx, vy, colorOf(owner));
   }
-  for (const b of myBullets) drawBullet(b.x, b.y, b.vx, b.vy, colorOf(myId));
+  for (const b of myBullets) drawBullet(b.x, b.y, b.vx, b.vy, colorOf(myId), b.w);
 
   // dash after-images
   for (const gh of ghosts) {
@@ -741,15 +741,10 @@ function drawMinimap(cw, ch) {
   g.restore();
 }
 
-function drawBullet(x, y, vx, vy, color) {
-  const l = Math.hypot(vx, vy) || 1;
-  gfx.drawGlow(g, x, y, 22, color, 0.55);
-  g.strokeStyle = color; g.globalAlpha = 0.45; g.lineWidth = 4;
-  g.beginPath(); g.moveTo(x - (vx / l) * 18, y - (vy / l) * 18); g.lineTo(x, y); g.stroke();
-  g.globalAlpha = 1;
-  g.fillStyle = '#fff';
-  g.beginPath(); g.arc(x, y, BULLET_R, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = color; g.lineWidth = 2; g.stroke();
+// the server's bullets don't say which weapon fired them; their speed does
+const weaponBySpeed = sp => (sp > 1200 ? 'sniper' : sp < 740 ? 'shotgun' : sp > 800 ? 'smg' : 'pistol');
+function drawBullet(x, y, vx, vy, color, weapon) {
+  gfx.drawBullet(g, x, y, vx, vy, color, weapon || weaponBySpeed(Math.hypot(vx, vy)));
 }
 
 const drawnPlayers = [];

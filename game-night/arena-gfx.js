@@ -22,7 +22,7 @@ export const WALL_H = 16; // how tall walls look
 export function preload() {
   for (const c of [...CHARACTERS, 'robot1']) for (const p of new Set(Object.values(POSE))) load(`${c}_${p}`);
   for (const m of MAP_LOOK) { load(m.floor); load(m.wall); if (m.deco) load(m.deco); }
-  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01']) load(n);
+  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01', 'spark_05', 'trace_07', 'trace_01', 'bulletSand1', 'bulletSand2', 'bulletDark3']) load(n);
 }
 
 // white particle textures, tinted once per colour
@@ -212,4 +212,38 @@ export function drawDarkness(g, view, cw, ch, dpr, poly, lights) {
   g.imageSmoothingEnabled = true;
   g.drawImage(lightCanvas, 0, 0, cw, ch);
   g.restore();
+}
+
+// A bullet: a glowing tracer streak in the shooter's colour behind a brass slug.
+// The look depends on the weapon (sniper: long thin streak, shotgun: short pellets).
+const BULLET_LOOK = {
+  pistol: { head: 'bulletSand1', hw: 5, hh: 13, trace: 'trace_07', len: 64, wid: 22 },
+  smg: { head: 'bulletSand1', hw: 4, hh: 10, trace: 'trace_07', len: 46, wid: 18 },
+  shotgun: { head: 'bulletSand2', hw: 5, hh: 7, trace: 'trace_07', len: 30, wid: 16 },
+  sniper: { head: 'bulletDark3', hw: 4, hh: 18, trace: 'trace_01', len: 160, wid: 26 },
+};
+export function drawBullet(g, x, y, vx, vy, color, weapon) {
+  const L = BULLET_LOOK[weapon] || BULLET_LOOK.pistol;
+  const a = Math.atan2(vy, vx);
+  const tr = tint(L.trace, color);
+  const head = load(L.head);
+  g.save();
+  g.translate(x, y);
+  g.rotate(a + Math.PI / 2); // sprites point up
+  if (tr) {
+    g.globalCompositeOperation = 'lighter';
+    g.drawImage(tr, -L.wid / 2, 0, L.wid, L.len); // streak trails behind (down = backwards)
+    g.globalCompositeOperation = 'source-over'; // a normal pass too, so the colour shows on light floors
+    g.globalAlpha = 0.55;
+    g.drawImage(tr, -L.wid / 2, 0, L.wid, L.len);
+    g.globalAlpha = 1;
+  }
+  if (ready(head)) g.drawImage(head, -L.hw / 2, -L.hh / 2, L.hw, L.hh);
+  g.restore();
+  drawGlow(g, x, y, weapon === 'sniper' ? 20 : 14, color, 0.45);
+}
+
+// sparks where a bullet hits a wall
+export function drawSpark(g, x, y, size, rot, alpha) {
+  drawSprite(g, 'spark_05', '#ffd98a', x, y, size, rot, alpha, true);
 }
