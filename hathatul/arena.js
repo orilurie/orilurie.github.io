@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=34';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=34';
-import { sound } from './arena-audio.js?v=34';
+} from './arena-core.js?v=35';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=35';
+import { sound } from './arena-audio.js?v=35';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 34;
+export const VERSION = 35;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -261,17 +261,19 @@ function autoTarget(me) {
 
 // ---------------------------------------------------------------------------------------------
 // Prediction
-let seq = 0, lastSent = 0, sentKey = '';
+let seq = 0, lastSent = 0, sentKey = '', sentF = false, sentDash = 0;
 const pending = []; // { seq, mx, my, dt, mul }
 let me = null; // predicted { x, y }
 let localCd = 0, myShotNo = 0, kick = 0;
 const ghosts = []; // dash after-images
+const predicted = []; // your hits not yet confirmed by the server { id, dmg, t }
 const flashes = []; // muzzle flashes
 const holes = []; // bullet marks on walls
 const hitAt = {}; // id -> time of last hit (white flash)
 let announce = null; // { text, life }
 let killerId = null; // who got you (the camera follows them while you wait)
 let zoomKick = 0;
+let tipUntil = 0; // round-start hint about pickups
 let myBullets = [];
 let others = []; // interpolated players for this frame
 const walls = () => MAPS[meta?.map ?? 0].walls;
@@ -305,7 +307,10 @@ function stepLocal(dt) {
   // send input ~15 times a second while it changes, and at least every 250 ms
   const now = performance.now();
   const key = `${input.mx},${input.my},${input.a},${input.f},${dashCount}`;
-  if (inGame() && ((key !== sentKey && now - lastSent > 66) || now - lastSent > 250)) {
+  // fire / dash changes go out at once; other changes at most 20 times a second
+  const urgent = input.f !== sentF || dashCount !== sentDash;
+  if (inGame() && ((key !== sentKey && (urgent || now - lastSent > 50)) || now - lastSent > 250)) {
+    sentF = input.f; sentDash = dashCount;
     seq++;
     sentKey = key;
     lastSent = now;
@@ -348,7 +353,18 @@ function stepLocal(dt) {
     if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); sound('wall', heardAt(b.x, b.y)); holes.push({ x: b.x - b.vx * 0.006, y: b.y - b.vy * 0.006, life: 6 }); if (holes.length > 60) holes.shift(); return false; }
     for (const o of others) {
       if (!o.alive || o.id === myId) continue;
-      if (Math.hypot(o.x - b.x, o.y - b.y) < R + BULLET_R) { spark(b.x, b.y, '#fff', 6); return false; }
+      if (Math.hypot(o.x - b.x, o.y - b.y) < R + BULLET_R) {
+        // show the hit right away; the server confirms it a moment later
+        spark(b.x, b.y, '#fff', 6);
+        if (!(o.flags & 4)) {
+          const dmg = b.dmg || DMG;
+          predicted.push({ id: o.id, dmg, t: performance.now() });
+          hitAt[o.id] = performance.now();
+          floaters.push({ x: b.x, y: b.y - 10, text: `-${dmg}`, color: '#fff', life: 0.8 });
+          sound('hit');
+        }
+        return false;
+      }
     }
     return true;
   });
@@ -356,7 +372,7 @@ function stepLocal(dt) {
 
 // ---------------------------------------------------------------------------------------------
 // Interpolation of other players
-const INTERP = 110; // ms
+const INTERP = 75; // ms
 function interpolate(now) {
   others = [];
   if (!snaps.length) return;
@@ -374,7 +390,7 @@ function interpolate(now) {
     const lerp = (x, y) => (jump ? y : x + (y - x) * k);
     let da = pb[3] - pa[3];
     da = Math.atan2(Math.sin(da), Math.cos(da));
-    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: pb[4], alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8], w: WEAPON_LIST[pb[9]] || 'pistol' });
+    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: Math.max(0, pb[4] - predicted.filter(q => q.id === pb[0]).reduce((a, q) => a + q.dmg, 0)), alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8], w: WEAPON_LIST[pb[9]] || 'pistol' });
   }
 }
 
@@ -413,14 +429,18 @@ function handleEvents(evs) {
           if (o) flashes.push({ x: o.x, y: o.y, a: o.aim, life: 0.06, big: wn === 'shotgun' || wn === 'sniper' });
         }
         break;
-      case 'hit':
+      case 'hit': {
+        if (ev.by === myId) { // already shown when your bullet touched them?
+          const i = predicted.findIndex(q => q.id === ev.v);
+          if (i >= 0) { predicted.splice(i, 1); break; }
+          sound('hit');
+        } else if (ev.v !== myId) sound('hit', { ...heardAt(ev.x, ev.y), vol: 0.6 });
         if (ev.by !== myId) spark(ev.x, ev.y, colorOf(ev.v), 7);
-        if (ev.by === myId) sound('hit');
-        else if (ev.v !== myId) sound('hit', { ...heardAt(ev.x, ev.y), vol: 0.6 });
         hitAt[ev.v] = performance.now();
         floaters.push({ x: ev.x, y: ev.y - 10, text: `-${ev.dmg || DMG}`, color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
         if (ev.v === myId) { sound('hurt'); haptic('hurt'); shake = Math.min(14, shake + 7); hurtFlash = 0.35; }
         break;
+      }
       case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); sound('block', heardAt(ev.x, ev.y)); break;
       case 'wall': break;
       case 'kill': {
@@ -434,14 +454,18 @@ function handleEvents(evs) {
       }
       case 'pick':
         spark(ev.x, ev.y, '#7dffb0', 10);
-        if (ev.id === myId) { sound('pickup'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 20, text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}`, color: '#7dffb0', life: 1.2 }); }
+        if (ev.id === myId) {
+          sound('pickup'); haptic('tap');
+          const info = { heal: '+40 חיים', shield: 'מגן 50', triple: '3 כדורים בכל ירייה – 8 שניות', speed: 'מהירות – 6 שניות', smg: 'יורה מהר! 45 כדורים', shotgun: '6 כדורים בכל ירייה, מקרוב – 8 יריות', sniper: 'טווח ארוך, 70 נזק – 5 יריות' }[ev.type];
+          announce = { text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}: ${info}`, life: 2.4, mine: true, small: true };
+        }
         break;
       case 'dash': if (ev.id !== myId) sound('dash', { ...heardAt(ev.x, ev.y), vol: 0.7 }); break;
       case 'empty': if (ev.id === myId) { sound('empty'); floaters.push({ x: me?.x ?? 0, y: (me?.y ?? 0) - 30, text: '🔫 חזרת לאקדח', color: '#ffd27a', life: 1.2 }); } break;
       case 'multi': shout(ev.id, ['', '', 'דאבל קיל! ✌️', 'טריפל קיל! 🔥', 'מולטי קיל! 💥'][Math.min(4, ev.n)]); break;
       case 'streak': shout(ev.id, `ברצף של ${ev.n}! 👑`); break;
       case 'stop': announce = { text: `${nameOf(ev.a)} עצר/ה את הרצף של ${nameOf(ev.v)} (+1) 🛑`, life: 2.5 }; if (ev.a === myId) sound('kill'); break;
-      case 'go': sound('go'); haptic('turn'); break;
+      case 'go': sound('go'); haptic('turn'); tipUntil = performance.now() + 7000; break;
       case 'spawn': break;
     }
   }
@@ -509,6 +533,9 @@ function drawWorld(now, dt) {
     g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillStyle = '#fff';
     g.fillText(PICKUPS[type].icon, x, y + 1);
+    g.font = '600 11px Rubik, sans-serif'; g.textBaseline = 'top';
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.7)';
+    g.strokeText(PICKUPS[type].name, x, y + 25); g.fillStyle = '#c9ffe0'; g.fillText(PICKUPS[type].name, x, y + 25);
   }
 
   // walls (shadow, then body)
@@ -821,7 +848,8 @@ function renderHud() {
     <div class="ar-board">${players.map(p => `<div class="${p.id === myId ? 'ar-mine' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}<b>${p.k}</b></div>`).join('')}</div>
     <div class="ar-feed">${feed.map(f => `<div><span style="color:${colorOf(f.a)}">${f.a ? esc(nameOf(f.a)) : '☠️ האזור'}</span> 🔫 <span style="color:${colorOf(f.v)}">${esc(nameOf(f.v))}</span></div>`).join('')}</div>
     ${center}
-    ${announce ? `<div class="ar-announce ${announce.mine ? 'mine' : ''}">${esc(announce.text)}</div>` : ''}
+    ${announce ? `<div class="ar-announce ${announce.mine ? 'mine' : ''} ${announce.small ? 'small' : ''}">${esc(announce.text)}</div>` : ''}
+    ${performance.now() < tipUntil ? '<div class="ar-tip">💡 אספו בונוסים מהזירה: 🔥 תת־מקלע · 💥 רובה ציד · 🎯 צלפים · 🔱 3 כדורים · ⚡ מהירות</div>' : ''}
     ${ui.reconnecting ? '<div class="ar-msg warn">📡 מתחבר מחדש…</div>' : ''}
     ${mine && mine[5] && meta.phase === 'play' ? `<div class="ar-bottom">
       <div class="ar-hp"><div style="width:${hp}%"></div>${sh ? `<div class="sh" style="width:${sh}%"></div>` : ''}<span>❤️ ${hp}${sh ? ` 🛡️ ${sh}` : ''}</span></div>
@@ -1033,7 +1061,8 @@ function frame(now) {
     const c = Math.ceil(lastSnap.tl);
     if (c !== lastCount && c > 0) { lastCount = c; sound('count'); }
   } else lastCount = null;
-  if (now - hudAt > 120) { hudAt = now; renderHud(); }
+  for (let i = predicted.length - 1; i >= 0; i--) if (now - predicted[i].t > 450) predicted.splice(i, 1); // the server said no
+  if (now - hudAt > 50) { hudAt = now; renderHud(); }
 }
 requestAnimationFrame(frame);
 

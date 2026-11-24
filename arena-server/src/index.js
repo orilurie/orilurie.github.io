@@ -298,7 +298,7 @@ export class Room {
     this.steps = [];
     this.results = null;
     this.t = 0;
-    this.nextPickup = 4;
+    this.nextPickup = 5;
     this.deadOrder = [];
     // the zone closes on a random open spot near the middle
     let zx = W / 2, zy = H / 2;
@@ -313,6 +313,7 @@ export class Room {
       this.spawn(p);
     }
     this.autoNext = 0;
+    for (let i = 0; i < 3; i++) this.spawnPickup();
     this.phase = 'count';
     this.countEnd = 3;
     this.endAt = 3 + DM_TIME;
@@ -479,15 +480,15 @@ export class Room {
       this.bullets = live;
 
       if (this.t >= this.nextPickup) {
-        this.nextPickup = this.t + 7;
-        if (this.pickups.length < 3) this.spawnPickup();
+        this.nextPickup = this.t + 5;
+        if (this.pickups.length < 5) this.spawnPickup();
       }
 
       if (this.mode === 'dm' && this.t >= this.endAt) this.endRound();
       else if (this.mode === 'lms' && this.participants().filter(p => p.alive).length <= 1) this.endRound();
     }
 
-    if (this.tickNo % 2 === 0 && this.phase !== 'end') this.sendSnapshot();
+    if (this.phase !== 'end') this.sendSnapshot(); // 30 updates a second
   }
 
   damage(p, amount, by, zone = false) {
