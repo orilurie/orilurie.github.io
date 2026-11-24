@@ -5,10 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist,
-} from './arena-core.js?v=31';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=31';
+} from './arena-core.js?v=32';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=32';
+import { sound } from './arena-audio.js?v=32';
+// where you hear from: you, or the camera while you're out
+const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
+const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 31;
+export const VERSION = 32;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -135,7 +139,10 @@ function onMsg(m) {
     snaps.push({ at, s: m });
     while (snaps.length > 30) snaps.shift();
     lastSnap = m;
-    for (const [x, y, a, side] of m.fs || []) footprints.push({ x, y, a, side, life: 2 });
+    for (const [x, y, a, side] of m.fs || []) {
+      footprints.push({ x, y, a, side, life: 2 });
+      sound('step', { ...heardAt(x, y), vol: 1.3 });
+    }
     handleEvents(m.ev || []);
     reconcile(m);
     if (meta && m.ph !== meta.phase && !(meta.phase === 'end')) { meta.phase = m.ph; }
@@ -274,7 +281,10 @@ function stepLocal(dt) {
   if (me && !me.dead && sp && sp[5] && playing) {
     const mul = sp[7] & 2 ? 1.4 : 1;
     const u = { seq, mx: input.mx, my: input.my, dt, mul };
+    const bx = me.x, by = me.y;
     move(me, u, dt, walls(), mul);
+    me.walked = (me.walked || 0) + Math.hypot(me.x - bx, me.y - by);
+    if (me.walked > 46) { me.walked = 0; sound('step', { vol: 0.35 }); }
     pending.push(u);
     if (pending.length > 200) pending.shift();
     const k = Math.min(1, dt * 10);
@@ -285,13 +295,13 @@ function stepLocal(dt) {
     if (input.f && localCd <= 0) {
       localCd = FIRE_CD;
       for (const b of shotBullets(me.x, me.y, input.a, sp[7] & 1)) myBullets.push(b);
-      play('shot');
+      sound('shot');
     }
   }
 
   // predicted bullets
   myBullets = myBullets.filter(b => {
-    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); return false; }
+    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); sound('wall', heardAt(b.x, b.y)); return false; }
     for (const o of others) {
       if (!o.alive || o.id === myId) continue;
       if (Math.hypot(o.x - b.x, o.y - b.y) < R + BULLET_R) { spark(b.x, b.y, '#fff', 6); return false; }
@@ -347,29 +357,31 @@ function handleEvents(evs) {
   for (const ev of evs) {
     switch (ev.k) {
       case 'shot':
-        if (ev.id !== myId) play('shotFar');
+        if (ev.id !== myId) sound('shot', { ...heardAt(ev.x, ev.y), vol: 0.8 });
         break;
       case 'hit':
         if (ev.by !== myId) spark(ev.x, ev.y, colorOf(ev.v), 7);
-        else play('hitmark');
+        if (ev.by === myId) sound('hit');
+        else if (ev.v !== myId) sound('hit', { ...heardAt(ev.x, ev.y), vol: 0.6 });
         floaters.push({ x: ev.x, y: ev.y - 10, text: `-${DMG}`, color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
-        if (ev.v === myId) { play('hurt'); haptic('hurt'); shake = Math.min(14, shake + 7); hurtFlash = 0.35; }
+        if (ev.v === myId) { sound('hurt'); haptic('hurt'); shake = Math.min(14, shake + 7); hurtFlash = 0.35; }
         break;
-      case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); break;
+      case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); sound('block', heardAt(ev.x, ev.y)); break;
       case 'wall': break;
       case 'kill': {
         if (ev.x !== undefined) { spark(ev.x, ev.y, colorOf(ev.v), 26, 260); spark(ev.x, ev.y, '#ffd27a', 12, 200); }
         feed.push({ a: ev.a, v: ev.v, life: 5 });
         if (feed.length > 4) feed.shift();
-        if (ev.v === myId) { play('die'); haptic('die'); shake = 18; }
-        else if (ev.a === myId) { play('kill'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 30, text: '💀 +1', color: '#ffd27a', life: 1.2 }); }
+        if (ev.x !== undefined && ev.v !== myId) sound('die', { ...heardAt(ev.x, ev.y), vol: 0.7 });
+        if (ev.v === myId) { sound('die'); haptic('die'); shake = 18; }
+        else if (ev.a === myId) { sound('kill'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 30, text: '💀 +1', color: '#ffd27a', life: 1.2 }); }
         break;
       }
       case 'pick':
         spark(ev.x, ev.y, '#7dffb0', 10);
-        if (ev.id === myId) { play('pickup'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 20, text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}`, color: '#7dffb0', life: 1.2 }); }
+        if (ev.id === myId) { sound('pickup'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 20, text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}`, color: '#7dffb0', life: 1.2 }); }
         break;
-      case 'go': play('go'); haptic('turn'); break;
+      case 'go': sound('go'); haptic('turn'); break;
       case 'spawn': break;
     }
   }
@@ -658,7 +670,8 @@ function renderHud() {
   const myMeta = meta.players.find(p => p.id === myId);
   const html = `
     <div class="ar-top">
-      <button class="ar-x" data-act="quit" aria-label="יציאה">✕</button>
+      <span><button class="ar-x" data-act="quit" aria-label="יציאה">✕</button>
+      <button class="ar-x" data-act="sound" aria-label="צליל">${sfxSettings.sound ? '🔊' : '🔇'}</button></span>
       <div class="ar-time">${top}</div>
       <div class="ar-me">💀 ${myMeta?.k ?? 0}</div>
     </div>
@@ -855,7 +868,7 @@ function frame(now) {
   drawWorld(now, dt);
   if (lastSnap?.ph === 'count') {
     const c = Math.ceil(lastSnap.tl);
-    if (c !== lastCount && c > 0) { lastCount = c; play('count'); }
+    if (c !== lastCount && c > 0) { lastCount = c; sound('count'); }
   } else lastCount = null;
   if (now - hudAt > 120) { hudAt = now; renderHud(); }
 }
