@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=38';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=38';
-import { sound } from './arena-audio.js?v=38';
+} from './arena-core.js?v=39';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=39';
+import { sound } from './arena-audio.js?v=39';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 38;
+export const VERSION = 39;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -969,6 +969,7 @@ function renderLobby() {
       <div class="im-setting"><span>מצב</span>${seg([['dm', '⏱️ קרב חופשי'], ['lms', '🎯 אחרון שורד']], meta.mode, 'cfgMode')}</div>
       <div class="im-setting"><span>מפה</span>${seg([[-1, '🎲'], ...MAPS.map((m, i) => [i, m.name])], meta.mapPick, 'cfgMap')}</div>
       <div class="im-setting"><span>בוטים 🤖</span>${seg([0, 1, 2, 3, 4, 5].map(n => [n, n, n > maxBots]), meta.bots, 'cfgBots')}</div>
+      <div class="im-setting"><span>רמת הבוטים</span>${seg([['vez', '😴 קל מאוד'], ['easy', '🙂 קל'], ['normal', '😐 רגיל'], ['hard', '😈 קשה']], meta.botLevel || 'easy', 'cfgBotLevel')}</div>
       ${isHost
         ? `<button class="primary" data-act="start" ${meta.players.length < 2 ? 'disabled' : ''}>🔫 התחילו!</button>
            ${meta.players.length < 2 ? '<p class="sub">מחכים לשחקנים… או הוסיפו בוט כדי להתחיל</p>' : ''}`
@@ -1040,6 +1041,7 @@ document.addEventListener('click', async e => {
     case 'cfgMode': return send({ t: 'cfg', mode: el.dataset.v });
     case 'cfgMap': return send({ t: 'cfg', map: Number(el.dataset.v) });
     case 'cfgBots': return send({ t: 'cfg', bots: Number(el.dataset.v) });
+    case 'cfgBotLevel': return send({ t: 'cfg', botLevel: el.dataset.v });
     case 'start': play('pop'); return send({ t: 'start' });
     case 'toLobby': return send({ t: 'lobby' });
     case 'sound': toggleSfx('sound'); return;

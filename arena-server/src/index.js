@@ -76,6 +76,17 @@ export class Matchmaker {
 const r1 = v => Math.round(v * 10) / 10;
 const r2 = v => Math.round(v * 100) / 100;
 const BOT_NAMES = ['רובי', 'צ׳יפ', 'ביפ', 'זיגי', 'טורבו'];
+// Bot skill. err/errD: aim error (radians) at 0 and per unit of distance; lead: how well they
+// guess where a moving target goes; react: seconds of seeing you before the first shot; turn: how
+// fast they swing their aim; extraCd: extra pause between shots; range: share of the weapon's
+// range they'll shoot from; view: share of the normal sight distance; hear: how far they hear
+// steps (0 = deaf); dash: chance to dodge when hit; strafe: sidestep in fights; speed.
+const BOT_LEVELS = {
+  vez: { err: 0.38, errD: 0.0007, lead: 0, react: 1.3, turn: 0.07, extraCd: 0.7, range: 0.55, view: 0.55, hear: 0, dash: 0, strafe: false, speed: 0.72, mem: 1.5 },
+  easy: { err: 0.24, errD: 0.00045, lead: 0.4, react: 0.95, turn: 0.11, extraCd: 0.35, range: 0.75, view: 0.75, hear: 280, dash: 0.05, strafe: true, speed: 0.85, mem: 3 },
+  normal: { err: 0.11, errD: 0.00026, lead: 1.1, react: 0.6, turn: 0.22, extraCd: 0, range: 1, view: 1, hear: 480, dash: 0.3, strafe: true, speed: 1, mem: 5 },
+  hard: { err: 0.035, errD: 0.0001, lead: 0.35, leadMin: 0.75, react: 0.3, turn: 0.4, extraCd: 0, range: 1, view: 1, hear: 560, dash: 0.45, strafe: true, speed: 1, mem: 6 },
+};
 const PICKUP_TYPES = ['heal', 'heal', 'shield', 'triple', 'speed', 'smg', 'shotgun', 'sniper', 'smg', 'shotgun'];
 
 export class Room {
@@ -90,6 +101,7 @@ export class Room {
     this.mode = 'dm';
     this.mapPick = -1; // -1 random
     this.botCount = 0;
+    this.botLevel = 'easy';
     this.map = 0;
     this.bullets = [];
     this.pickups = [];
@@ -189,6 +201,7 @@ export class Room {
         if (msg.mode === 'dm' || msg.mode === 'lms') this.mode = msg.mode;
         if (Number.isInteger(msg.map) && msg.map >= -1 && msg.map < MAPS.length) this.mapPick = msg.map;
         if (Number.isInteger(msg.bots)) this.setBots(msg.bots);
+        if (BOT_LEVELS[msg.botLevel]) this.botLevel = msg.botLevel;
         return this.sendMeta();
       }
       case 'start':
@@ -413,19 +426,19 @@ export class Room {
         }
       }
       if (p.dashT > 0) { p.dashT -= TICK; move(p, p.dashDir, TICK, walls, DASH.speed, true); }
-      else move(p, inp, TICK, walls, this.t < p.buffs.speed ? 1.4 : 1);
+      else move(p, inp, TICK, walls, (this.t < p.buffs.speed ? 1.4 : 1) * BOT_LEVELS[this.botLevel].speed);
       this.footsteps(p, ox, oy);
       }
       p.cd -= TICK;
       if (inp.f && p.cd <= 0) {
         const w = WEAPONS[p.weapon];
-        p.cd = w.cd;
+        p.cd = w.cd + (p.bot ? BOT_LEVELS[this.botLevel].extraCd : 0);
         p.lastShotT = this.t;
         for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple, p.weapon, p.shotNo++)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id });
         this.emit({ k: 'shot', id: p.id, x: r1(p.x), y: r1(p.y), w: WEAPON_LIST.indexOf(p.weapon) });
         if (Number.isFinite(p.ammo) && --p.ammo <= 0) { p.weapon = 'pistol'; p.ammo = Infinity; this.emit({ k: 'empty', id: p.id }); }
         for (const o of this.players.values()) {
-          if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 750) o.ai.heard = { x: p.x, y: p.y, t: this.t };
+          if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < BOT_LEVELS[this.botLevel].hear * 1.6) o.ai.heard = { x: p.x, y: p.y, t: this.t };
         }
       }
       // pickups
@@ -460,8 +473,9 @@ export class Room {
             if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); break; }
             this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y), dmg: b.dmg || DMG });
             if (p.bot) {
-              p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
-              if (p.dashCd <= 0 && Math.random() < 0.3) p.wantDash = true;
+              const L = BOT_LEVELS[this.botLevel];
+              if (L.hear || Math.random() < 0.4) p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
+              if (p.dashCd <= 0 && Math.random() < L.dash) p.wantDash = true;
             }
             const sp = Math.hypot(b.vx, b.vy) || 1, push = WEAPONS[b.w]?.push || 8;
             p.x += (b.vx / sp) * push; p.y += (b.vy / sp) * push;
@@ -559,7 +573,7 @@ export class Room {
     p.side = -(p.side || 1);
     this.steps.push([r1(p.x), r1(p.y), r2(Math.atan2(p.y - oy, p.x - ox)), p.side, p.id]);
     for (const o of this.players.values()) {
-      if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 480) o.ai.heard = { x: p.x, y: p.y, t: this.t };
+      if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < BOT_LEVELS[this.botLevel].hear) o.ai.heard = { x: p.x, y: p.y, t: this.t };
     }
   }
 
@@ -575,10 +589,11 @@ export class Room {
   // Bots play by the same rules: they only know about you if they see you (same vision cone),
   // remember where they last saw you, and go check on footsteps, shots and hits they hear.
   botThink(p) {
-    const ai = p.ai, walls = this.walls;
+    const ai = p.ai, walls = this.walls, L = BOT_LEVELS[this.botLevel];
     let target = null, td = Infinity;
     for (const o of this.players.values()) {
       if (!o.alive || o === p || !this.visible(p, o)) continue;
+      if (Math.hypot(o.x - p.x, o.y - p.y) > 720 * L.view) continue; // weaker bots see less far
       const d = Math.hypot(o.x - p.x, o.y - p.y);
       if (d < td) { td = d; target = o; }
     }
@@ -594,7 +609,7 @@ export class Room {
     else if (target) { fight = true; }
     else if (pick && pick.d < 320) goal = pick.u;
     else if (ai.heard && this.t - ai.heard.t < 4) { goal = ai.heard; look = ai.heard; if (Math.hypot(ai.heard.x - p.x, ai.heard.y - p.y) < 50) ai.heard = null; }
-    else if (ai.mem && this.t - ai.mem.t < 5) { goal = ai.mem; look = ai.mem; if (Math.hypot(ai.mem.x - p.x, ai.mem.y - p.y) < 50) ai.mem = null; }
+    else if (ai.mem && this.t - ai.mem.t < L.mem) { goal = ai.mem; look = ai.mem; if (Math.hypot(ai.mem.x - p.x, ai.mem.y - p.y) < 50) ai.mem = null; }
     else {
       if (!ai.wander || Math.hypot(ai.wander.x - p.x, ai.wander.y - p.y) < 60 || this.t - ai.wander.t > 12) {
         for (let i = 0; i < 20; i++) {
@@ -613,13 +628,14 @@ export class Room {
       if (this.t >= ai.next) { ai.next = this.t + 0.25 + Math.random() * 0.2; if (Math.random() < 0.15) ai.strafe *= -1; }
       const toT = Math.atan2(target.y - p.y, target.x - p.x);
       const far = { shotgun: 200, sniper: 520, smg: 330 }[p.weapon] || 380, close = p.weapon === 'shotgun' ? 90 : p.weapon === 'sniper' ? 300 : 180;
-      let a = dist > far ? toT : dist < close ? toT + Math.PI + ai.strafe * 0.6 : toT + ai.strafe * Math.PI / 2;
-      for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
+      let a = dist > far ? toT : dist < close ? toT + Math.PI + ai.strafe * 0.6 : L.strafe ? toT + ai.strafe * Math.PI / 2 : toT;
+      if (!L.strafe && dist <= far && dist >= close) a = null; // weak bots just stand and shoot
+      for (const off of a === null ? [] : [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
         const q = { x: p.x, y: p.y };
         move(q, { mx: Math.cos(a + off), my: Math.sin(a + off) }, 0.25, walls, 1, true);
         if (Math.hypot(q.x - p.x, q.y - p.y) > SPEED * 0.25 * 0.7) { a += off; break; }
       }
-      mx = Math.cos(a); my = Math.sin(a);
+      if (a !== null) { mx = Math.cos(a); my = Math.sin(a); }
       ai.path = [];
     } else if (goal) {
       const gk = `${Math.round(goal.x / 40)},${Math.round(goal.y / 40)}`;
@@ -654,12 +670,12 @@ export class Room {
       if (ai.err === undefined || ai.errFor !== ai.shotNo) {
         ai.errFor = ai.shotNo;
         const gauss = (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
-        ai.err = gauss * (0.11 + dist * 0.00026);
-        ai.leadK = Math.random() * 1.1;
+        ai.err = gauss * (L.err + dist * L.errD);
+        ai.leadK = (L.leadMin || 0) + Math.random() * L.lead;
       }
       const lead = (dist / BULLET_SPEED) * ai.leadK;
       want = Math.atan2(target.y + vy * lead - p.y, target.x + vx * lead - p.x) + ai.err;
-      turn = 0.22;
+      turn = L.turn;
     } else if (look && Math.hypot(look.x - p.x, look.y - p.y) > 40) {
       want = Math.atan2(look.y - p.y, look.x - p.x);
       turn = ai.heard?.hit ? 0.25 : 0.15;
@@ -670,7 +686,7 @@ export class Room {
     da = Math.atan2(Math.sin(da), Math.cos(da));
     p.input.a += da * turn;
     const range = { shotgun: 280, sniper: 900, smg: 480 }[p.weapon] || 620;
-    p.input.f = fight && dist < range && ai.seen > 0.6 && Math.abs(da) < 0.12 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
+    p.input.f = fight && dist < range * L.range && ai.seen > L.react && Math.abs(da) < 0.12 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
     if (p.input.f && p.cd <= 0) ai.shotNo = (ai.shotNo || 0) + 1; // fires this tick: next shot gets a new error
   }
 
@@ -787,7 +803,7 @@ export class Room {
   sendMeta() {
     this.broadcast({
       t: 'room', code: this.code, pub: this.pub, host: this.host, phase: this.phase, mode: this.mode,
-      mapPick: this.mapPick, map: this.map, bots: this.botCount,
+      mapPick: this.mapPick, map: this.map, bots: this.botCount, botLevel: this.botLevel,
       players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.bot, on: p.on, k: p.kills, d: p.deaths, inRound: p.inRound, lvl: p.bot ? 0 : p.lvl })),
       next: this.phase === 'end' && this.autoNext ? Math.max(0, Math.round((this.autoNext - Date.now()) / 1000)) : null,
       results: this.results,
