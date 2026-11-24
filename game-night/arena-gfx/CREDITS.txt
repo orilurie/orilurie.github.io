@@ -1,0 +1,3 @@
+Graphics used by the arena game (זירה). All CC0 (public domain), by Kenney (www.kenney.nl):
+- characters, floor/wall tiles, bushes: "Topdown Shooter" pack
+- muzzle flash, smoke, light, glow, scorch, dust: "Particle Pack" (resized to 128 px)

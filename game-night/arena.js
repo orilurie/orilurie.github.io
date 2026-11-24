@@ -3,16 +3,17 @@
 // shots so controls feel instant, and interpolates everyone else ~110 ms in the past.
 
 import {
-  W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
+  W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=40';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=40';
-import { sound } from './arena-audio.js?v=40';
+} from './arena-core.js?v=41';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=41';
+import * as gfx from './arena-gfx.js?v=41';
+import { sound } from './arena-audio.js?v=41';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 40;
+export const VERSION = 41;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -187,6 +188,7 @@ function dashPress() {
   lastSent = 0; // send right away
   sound('dash');
   haptic('tap');
+  puff(me.x, me.y, 4, '#c9b89a', 'dirt_01', 46, 30);
 }
 addEventListener('blur', () => { keys.clear(); sticks.move = sticks.aim = null; if (mouse) mouse.down = false; });
 
@@ -275,6 +277,7 @@ const pending = []; // { seq, mx, my, dt, mul }
 let me = null; // predicted { x, y }
 let localCd = 0, myShotNo = 0, kick = 0;
 const ghosts = []; // dash after-images
+const splats = []; // paint left where someone fell
 const predicted = []; // your hits not yet confirmed by the server { id, dmg, t }
 const flashes = []; // muzzle flashes
 const holes = []; // bullet marks on walls
@@ -347,6 +350,7 @@ function stepLocal(dt) {
       kick = w.kick;
       shake = Math.min(16, shake + w.kick * 0.6);
       flashes.push({ x: me.x, y: me.y, a: input.a, life: 0.06, big: wname === 'shotgun' || wname === 'sniper' });
+      puff(me.x + Math.cos(input.a) * 40, me.y + Math.sin(input.a) * 40, 1, '#c8ccd6', 'smoke_04', 30, 20);
       // a shell flies out to the side
       const sa = input.a + Math.PI / 2 + (Math.random() - 0.5) * 0.6;
       particles.push({ x: me.x, y: me.y, vx: Math.cos(sa) * 140, vy: Math.sin(sa) * 140, life: 0.5, max: 0.5, color: '#e6b94a', size: 3 });
@@ -402,7 +406,7 @@ function interpolate(now) {
     const lerp = (x, y) => (jump ? y : x + (y - x) * k);
     let da = pb[3] - pa[3];
     da = Math.atan2(Math.sin(da), Math.cos(da));
-    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: Math.max(0, pb[4] - predicted.filter(q => q.id === pb[0]).reduce((a, q) => a + q.dmg, 0)), alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8], w: WEAPON_LIST[pb[9]] || 'pistol' });
+    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: Math.max(0, pb[4] - predicted.filter(q => q.id === pb[0]).reduce((a, q) => a + q.dmg, 0)), alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8], w: WEAPON_LIST[pb[9]] || 'pistol', moving: Math.min(1, Math.hypot(pb[10] || 0, pb[11] || 0) / 200) });
   }
 }
 
@@ -417,6 +421,13 @@ let seenEv = new Set();
 const playerById = id => meta?.players.find(p => p.id === id);
 const nameOf = id => playerById(id)?.name || '?';
 const colorOf = id => playerById(id)?.color || '#ccc';
+
+function puff(x, y, n, color, sprite, size, speed = 40) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = speed * (0.3 + Math.random());
+    particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.7 + Math.random() * 0.4, max: 1.1, color, size: size * (0.6 + Math.random() * 0.5), sprite, rot: Math.random() * 6, alpha: 0.45 });
+  }
+}
 
 function spark(x, y, color, n = 8, speed = 160) {
   for (let i = 0; i < n; i++) {
@@ -456,7 +467,13 @@ function handleEvents(evs) {
       case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); sound('block', heardAt(ev.x, ev.y)); break;
       case 'wall': break;
       case 'kill': {
-        if (ev.x !== undefined) { spark(ev.x, ev.y, colorOf(ev.v), 26, 260); spark(ev.x, ev.y, '#ffd27a', 12, 200); }
+        if (ev.x !== undefined) {
+          spark(ev.x, ev.y, colorOf(ev.v), 26, 260); spark(ev.x, ev.y, '#ffd27a', 12, 200);
+          splats.push({ x: ev.x, y: ev.y, color: colorOf(ev.v), size: 90, rot: Math.random() * 6, life: 10 });
+          if (splats.length > 20) splats.shift();
+          puff(ev.x, ev.y, 6, '#9aa3b5', 'smoke_04', 70);
+          particles.push({ x: ev.x, y: ev.y, vx: 0, vy: 0, life: 0.35, max: 0.35, color: '#ffcf7a', size: 160, sprite: 'light_02', add: true, alpha: 0.9 });
+        }
         feed.push({ a: ev.a, v: ev.v, life: 5 });
         if (feed.length > 4) feed.shift();
         if (ev.x !== undefined && ev.v !== myId) sound('die', { ...heardAt(ev.x, ev.y), vol: 0.7 });
@@ -472,7 +489,7 @@ function handleEvents(evs) {
           announce = { text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}: ${info}`, life: 2.4, mine: true, small: true };
         }
         break;
-      case 'dash': if (ev.id !== myId) sound('dash', { ...heardAt(ev.x, ev.y), vol: 0.7 }); break;
+      case 'dash': puff(ev.x, ev.y, 4, '#c9b89a', 'dirt_01', 46, 30); if (ev.id !== myId) sound('dash', { ...heardAt(ev.x, ev.y), vol: 0.7 }); break;
       case 'empty': if (ev.id === myId) { sound('empty'); floaters.push({ x: me?.x ?? 0, y: (me?.y ?? 0) - 30, text: '🔫 חזרת לאקדח', color: '#ffd27a', life: 1.2 }); } break;
       case 'multi': shout(ev.id, ['', '', 'דאבל קיל! ✌️', 'טריפל קיל! 🔥', 'מולטי קיל! 💥'][Math.min(4, ev.n)]); break;
       case 'streak': shout(ev.id, `ברצף של ${ev.n}! 👑`); break;
@@ -528,18 +545,10 @@ function drawWorld(now, dt) {
   const sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0;
   g.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * (cw / 2 - view.x * view.s + sx), dpr * (ch / 2 - view.y * view.s + sy));
 
-  // floor
-  g.fillStyle = '#1c2436';
-  g.fillRect(0, 0, W, H);
-  g.strokeStyle = 'rgba(255,255,255,0.045)';
-  g.lineWidth = 2;
-  g.beginPath();
-  for (let x = 50; x < W; x += 50) { g.moveTo(x, 0); g.lineTo(x, H); }
-  for (let y = 50; y < H; y += 50) { g.moveTo(0, y); g.lineTo(W, y); }
-  g.stroke();
-  g.strokeStyle = '#4b5b80';
-  g.lineWidth = 6;
-  g.strokeRect(-3, -3, W + 6, H + 6);
+  // floor (textured per map) and paint splats where players fell
+  const mapI = meta?.map ?? 0;
+  gfx.drawFloor(g, mapI, W, H);
+  for (const d of splats) gfx.drawSprite(g, 'scorch_01', d.color, d.x, d.y, d.size, d.rot, Math.min(0.75, d.life / 2));
 
   const s = lastSnap;
   // pickups
@@ -555,22 +564,6 @@ function drawWorld(now, dt) {
     g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.7)';
     g.strokeText(PICKUPS[type].name, x, y + 25); g.fillStyle = '#c9ffe0'; g.fillText(PICKUPS[type].name, x, y + 25);
   }
-
-  // walls (shadow, then body)
-  const ws = walls();
-  g.fillStyle = 'rgba(0,0,0,0.35)';
-  for (const [x, y, w, h] of ws) g.fillRect(x + 6, y + 9, w, h);
-  for (const [x, y, w, h] of ws) {
-    g.fillStyle = '#3d4a68'; g.fillRect(x, y, w, h);
-    g.fillStyle = '#56668f'; g.fillRect(x, y, w, 6);
-    g.strokeStyle = '#2a334a'; g.lineWidth = 2; g.strokeRect(x + 1, y + 1, w - 2, h - 2);
-  }
-  for (const h of holes) {
-    g.globalAlpha = Math.min(1, h.life / 2) * 0.7;
-    g.fillStyle = '#141a28';
-    g.beginPath(); g.arc(h.x, h.y, 3, 0, Math.PI * 2); g.fill();
-  }
-  g.globalAlpha = 1;
 
   // bullets: others' from the server (extrapolated), yours predicted
   const age = s ? (now - snaps[snaps.length - 1].at) / 1000 : 0;
@@ -595,53 +588,36 @@ function drawWorld(now, dt) {
     const p = mine ? { ...o, x: me.x - Math.cos(input.a) * kick, y: me.y - Math.sin(input.a) * kick, aim: input.a, w: WEAPON_LIST[lastSnap?.me?.w ?? 0] } : o;
     drawPlayer(p, now);
   }
-  // muzzle flashes (with a little light)
-  for (const f of flashes) {
-    const len = f.big ? 34 : 22, wid = f.big ? 14 : 9;
-    const tx = f.x + Math.cos(f.a) * (R + 18), ty = f.y + Math.sin(f.a) * (R + 18);
-    const grd = g.createRadialGradient(tx, ty, 0, tx, ty, f.big ? 90 : 60);
-    grd.addColorStop(0, 'rgba(255,220,140,0.35)'); grd.addColorStop(1, 'rgba(255,220,140,0)');
-    g.fillStyle = grd; g.beginPath(); g.arc(tx, ty, f.big ? 90 : 60, 0, Math.PI * 2); g.fill();
-    g.save(); g.translate(tx, ty); g.rotate(f.a);
-    g.fillStyle = '#ffe9a8';
-    g.beginPath(); g.moveTo(0, -wid / 2); g.lineTo(len, 0); g.lineTo(0, wid / 2); g.closePath(); g.fill();
-    g.fillStyle = '#fff'; g.beginPath(); g.arc(2, 0, wid / 3, 0, Math.PI * 2); g.fill();
-    g.restore();
-  }
-  // bushes cover whoever is inside (yours is see-through so you know where you are)
-  const meIn = me && !me.dead && inBush(me.x, me.y, meta?.map ?? 0);
-  for (const [bx, by, br] of MAPS[meta?.map ?? 0].bushes || []) {
-    const mineHere = meIn && Math.hypot(me.x - bx, me.y - by) < br;
-    g.globalAlpha = mineHere ? 0.5 : 0.95;
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2 + bx, rr = br * 0.55;
-      g.fillStyle = i % 2 ? '#2f7a45' : '#3a8f52';
-      g.beginPath(); g.arc(bx + Math.cos(a) * rr * 0.6, by + Math.sin(a) * rr * 0.6, rr, 0, Math.PI * 2); g.fill();
-    }
-    g.fillStyle = '#4aa863';
-    g.beginPath(); g.arc(bx - br * 0.15, by - br * 0.2, br * 0.45, 0, Math.PI * 2); g.fill();
+  // walls are drawn over the players so someone behind a wall is partly hidden, like in 3D
+  gfx.drawWalls(g, mapI, walls());
+  for (const h of holes) {
+    g.globalAlpha = Math.min(1, h.life / 2) * 0.7;
+    g.fillStyle = '#141a28';
+    g.beginPath(); g.arc(h.x, h.y - gfx.WALL_H, 3, 0, Math.PI * 2); g.fill();
   }
   g.globalAlpha = 1;
+  // muzzle flashes
+  for (const f of flashes) gfx.drawMuzzle(g, f.x, f.y, f.a, f.big, f.life);
+  // bushes cover whoever is inside (yours is see-through so you know where you are)
+  const meIn = me && !me.dead && inBush(me.x, me.y, meta?.map ?? 0);
+  for (const [bx, by, br] of MAPS[mapI].bushes || []) gfx.drawBush(g, bx, by, br, now, meIn && Math.hypot(me.x - bx, me.y - by) < br);
 
   // particles
   for (const pt of particles) {
-    g.globalAlpha = Math.max(0, pt.life / pt.max);
+    const a = Math.max(0, pt.life / pt.max);
+    if (pt.sprite) { gfx.drawSprite(g, pt.sprite, pt.color, pt.x, pt.y, pt.size * (1.6 - a * 0.6), pt.rot || 0, a * (pt.alpha ?? 0.6), pt.add); continue; }
+    g.globalAlpha = a;
     g.fillStyle = pt.color;
     g.fillRect(pt.x - pt.size / 2, pt.y - pt.size / 2, pt.size, pt.size);
   }
   g.globalAlpha = 1;
 
-  // fog: outside your view cone (and the small circle around you) you see the arena, not players
+  // darkness outside what you can see (soft edges); muzzle flashes light up their surroundings
   const looking = me && !me.dead && meta?.phase === 'play';
   if (looking) {
-    const poly = visionPolygon(me.x, me.y, input.a);
-    g.fillStyle = 'rgba(6,9,18,0.62)';
-    g.beginPath();
-    g.rect(-400, -400, W + 800, H + 800);
-    g.moveTo(poly[0], poly[1]);
-    for (let i = 2; i < poly.length; i += 2) g.lineTo(poly[i], poly[i + 1]);
-    g.closePath();
-    g.fill('evenodd');
+    const lights = flashes.map(f => ({ x: f.x + Math.cos(f.a) * 40, y: f.y + Math.sin(f.a) * 40, r: f.big ? 200 : 140, a: 0.6 }));
+    lights.push({ x: me.x, y: me.y, r: 160, a: 0.5 });
+    gfx.drawDarkness(g, { x: view.x, y: view.y, s: view.s }, cw, ch, dpr, visionPolygon(me.x, me.y, input.a), lights);
   }
   // footprints: you can't see them, but you notice their tracks
   for (const f of footprints) {
@@ -670,6 +646,9 @@ function drawWorld(now, dt) {
     g.beginPath(); g.arc(zx, zy, zr, 0, Math.PI * 2); g.stroke();
     g.setLineDash([]);
   }
+
+  for (const o of drawnPlayers) drawLabel(o, now);
+  drawnPlayers.length = 0;
 
   // floating text
   g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -764,6 +743,7 @@ function drawMinimap(cw, ch) {
 
 function drawBullet(x, y, vx, vy, color) {
   const l = Math.hypot(vx, vy) || 1;
+  gfx.drawGlow(g, x, y, 22, color, 0.55);
   g.strokeStyle = color; g.globalAlpha = 0.45; g.lineWidth = 4;
   g.beginPath(); g.moveTo(x - (vx / l) * 18, y - (vy / l) * 18); g.lineTo(x, y); g.stroke();
   g.globalAlpha = 1;
@@ -772,66 +752,39 @@ function drawBullet(x, y, vx, vy, color) {
   g.strokeStyle = color; g.lineWidth = 2; g.stroke();
 }
 
+const drawnPlayers = [];
 function drawPlayer(p, now) {
   const color = colorOf(p.id);
-  const isMe = p.id === myId;
-  // shadow
-  g.fillStyle = 'rgba(0,0,0,0.35)';
-  g.beginPath(); g.ellipse(p.x + 4, p.y + 8, R, R * 0.7, 0, 0, Math.PI * 2); g.fill();
-  if (p.flags & 2) { // speed trail
-    g.fillStyle = color; g.globalAlpha = 0.25;
-    g.beginPath(); g.arc(p.x - Math.cos(p.aim) * 10, p.y - Math.sin(p.aim) * 10, R * 0.9, 0, Math.PI * 2); g.fill();
-    g.globalAlpha = 1;
-  }
-  // gun(s)
-  g.save(); g.translate(p.x, p.y); g.rotate(p.aim);
-  const look = { pistol: [22, 10], smg: [18, 12], shotgun: [26, 14], sniper: [40, 8] }[p.w || 'pistol'] || [22, 10];
-  const barrels = p.flags & 1 && (p.w || 'pistol') !== 'shotgun' ? [-0.16, 0, 0.16] : [0];
-  for (const off of barrels) {
-    g.save(); g.rotate(off);
-    g.fillStyle = '#20242e'; g.fillRect(R - 6, -look[1] / 2, look[0], look[1]);
-    g.fillStyle = color; g.fillRect(R - 10 + look[0], -look[1] / 2, 4, look[1]);
-    g.restore();
-  }
-  g.restore();
-  // body
-  g.fillStyle = color;
-  g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill();
-  g.lineWidth = isMe ? 4 : 3; g.strokeStyle = isMe ? '#fff' : 'rgba(0,0,0,0.45)'; g.stroke();
-  // eyes look where you aim
-  const ex = Math.cos(p.aim) * 6, ey = Math.sin(p.aim) * 6;
-  for (const side of [-1, 1]) {
-    const ox = -Math.sin(p.aim) * 6 * side, oy = Math.cos(p.aim) * 6 * side;
-    g.fillStyle = '#fff'; g.beginPath(); g.arc(p.x + ex * 0.5 + ox, p.y + ey * 0.5 + oy, 4.5, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#111'; g.beginPath(); g.arc(p.x + ex * 0.8 + ox, p.y + ey * 0.8 + oy, 2.2, 0, Math.PI * 2); g.fill();
-  }
+  const seat = Math.max(0, COLORS.indexOf(color));
   const since = performance.now() - (hitAt[p.id] || -1e9);
-  if (since < 110) { // white flash when hit
-    g.fillStyle = `rgba(255,255,255,${0.85 * (1 - since / 110)})`;
-    g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill();
-  }
-  if (p.flags & 16) { // on a streak
-    g.font = '18px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillStyle = '#fff';
-    g.fillText('👑', p.x, p.y - R - 26);
-  }
+  const moving = p.id === myId && me ? Math.min(1, Math.hypot(me.vx || 0, me.vy || 0) / 200) : p.moving || 0;
+  const ok = gfx.drawCharacter(g, { x: p.x, y: p.y, aim: p.aim, w: p.w || 'pistol', moving, dash: !!(p.flags & 8), flash: since < 120 ? 0.9 * (1 - since / 120) : 0, bot: playerById(p.id)?.bot }, seat, color, now);
+  if (!ok) { g.fillStyle = color; g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill(); }
+  if (p.flags & 2) gfx.drawGlow(g, p.x, p.y, 34, '#7fd8ff', 0.35); // speed
+  if (p.flags & 1) gfx.drawGlow(g, p.x, p.y, 34, '#ffd27a', 0.3); // triple shot
   if (p.flags & 4) { // spawn protection bubble
     g.strokeStyle = `rgba(159,232,255,${0.5 + Math.sin(now / 80) * 0.3})`; g.lineWidth = 3;
-    g.beginPath(); g.arc(p.x, p.y, R + 7, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(p.x, p.y, R + 9, 0, Math.PI * 2); g.stroke();
   }
   if (p.shield > 0) {
-    g.strokeStyle = 'rgba(90,180,255,0.85)'; g.lineWidth = 3;
-    g.beginPath(); g.arc(p.x, p.y, R + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (p.shield / 50)); g.stroke();
+    g.strokeStyle = 'rgba(90,180,255,0.9)'; g.lineWidth = 3;
+    g.beginPath(); g.arc(p.x, p.y, R + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (p.shield / 50)); g.stroke();
   }
-  // name + health
+  drawnPlayers.push(p);
+}
+
+// name, level, health and crown: drawn last so walls and bushes never cover them
+function drawLabel(p, now) {
   g.font = `600 13px Rubik, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom';
   g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.6)';
   const lv = playerById(p.id)?.lvl;
   const nm = (lv ? `⭐${lv} ` : '') + nameOf(p.id);
-  g.strokeText(nm, p.x, p.y - R - 12); g.fillStyle = '#fff'; g.fillText(nm, p.x, p.y - R - 12);
+  g.strokeText(nm, p.x, p.y - R - 14); g.fillStyle = '#fff'; g.fillText(nm, p.x, p.y - R - 14);
   const bw = 40;
-  g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(p.x - bw / 2, p.y - R - 10, bw, 5);
+  g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(p.x - bw / 2, p.y - R - 12, bw, 5);
   g.fillStyle = p.hp > 50 ? '#3ccf7a' : p.hp > 25 ? '#ffb02e' : '#ff4d4d';
-  g.fillRect(p.x - bw / 2, p.y - R - 10, bw * Math.max(0, p.hp) / MAX_HP, 5);
+  g.fillRect(p.x - bw / 2, p.y - R - 12, bw * Math.max(0, p.hp) / MAX_HP, 5);
+  if (p.flags & 16) { g.font = '18px sans-serif'; g.fillStyle = '#fff'; g.fillText('👑', p.x, p.y - R - 30); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1065,7 +1018,7 @@ function frame(now) {
   for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
   for (const f of floaters) { f.y -= 30 * dt; f.life -= dt; }
   for (const f of footprints) f.life -= dt;
-  for (const a of [ghosts, flashes, holes]) { for (const x of a) x.life -= dt; for (let i = a.length - 1; i >= 0; i--) if (a[i].life <= 0) a.splice(i, 1); }
+  for (const a of [ghosts, flashes, holes, splats]) { for (const x of a) x.life -= dt; for (let i = a.length - 1; i >= 0; i--) if (a[i].life <= 0) a.splice(i, 1); }
   kick = Math.max(0, kick - dt * 40);
   zoomKick = Math.max(0, zoomKick - dt * 0.35);
   if (announce && (announce.life -= dt) <= 0) announce = null;
@@ -1095,3 +1048,5 @@ setInterval(async () => {
 }, 2000);
 
 render();
+
+gfx.preload();
