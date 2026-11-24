@@ -327,6 +327,7 @@ export class Room {
       this.spawn(p);
     }
     this.autoNext = 0;
+    this.zoneDur = 15 * this.participants().length;
     for (let i = 0; i < 3; i++) this.spawnPickup();
     this.phase = 'count';
     this.countEnd = 3;
@@ -392,11 +393,12 @@ export class Room {
     const playing = this.phase === 'play';
     const walls = this.walls;
 
-    if (this.mode === 'lms' && playing) { // the safe zone shrinks from 15 s in, over 75 s,
-      // then keeps closing to nothing, so a round always ends
-      const full = Math.hypot(W, H) / 2 + 40 + Math.hypot(this.zone.x - W / 2, this.zone.y - H / 2), k = Math.min(1, Math.max(0, (this.t - 18) / 75));
-      this.zone.r = full + (150 - full) * k;
-      if (this.t > 93) this.zone.r = Math.max(0, 150 - (this.t - 93) * 4);
+    if (this.mode === 'lms' && playing) {
+      // 15 seconds per player: the zone closes completely by then (2 players: 30 s, 3: 45 s…).
+      // A short grace period first, then it shrinks steadily to nothing, so a round always ends.
+      const full = Math.hypot(W, H) / 2 + 40 + Math.hypot(this.zone.x - W / 2, this.zone.y - H / 2);
+      const grace = this.zoneDur * 0.12, k = Math.min(1, Math.max(0, (this.t - this.countEnd - grace) / (this.zoneDur - grace)));
+      this.zone.r = full * (1 - k);
     }
 
     for (const p of this.players.values()) {
@@ -766,7 +768,7 @@ export class Room {
     }
     const base = {
       t: 's', n: this.tickNo, ph: this.phase,
-      tl: this.phase === 'count' ? r1(this.countEnd - this.t) : this.mode === 'dm' ? r1(Math.max(0, this.endAt - this.t)) : null,
+      tl: this.phase === 'count' ? r1(this.countEnd - this.t) : this.mode === 'dm' ? r1(Math.max(0, this.endAt - this.t)) : r1(Math.max(0, this.countEnd + this.zoneDur - this.t)),
       z: this.mode === 'lms' && this.zone ? [r1(this.zone.x), r1(this.zone.y), r1(this.zone.r)] : null,
       ack,
       u: this.pickups.map(u => [u.id, u.type, r1(u.x), r1(u.y)]),

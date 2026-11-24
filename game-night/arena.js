@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=39';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=39';
-import { sound } from './arena-audio.js?v=39';
+} from './arena-core.js?v=40';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=40';
+import { sound } from './arena-audio.js?v=40';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 39;
+export const VERSION = 40;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -853,7 +853,7 @@ function renderHud() {
   } else if (meta.phase === 'play' && !mine) center = '<div class="ar-msg">👀 צופה – תצטרפו בסיבוב הבא</div>';
   const top = meta.mode === 'dm'
     ? `⏱️ ${fmtTime(tl ?? 0)}`
-    : `🎯 נשארו ${alive}`;
+    : `🎯 נשארו ${alive} · 🔴 ${fmtTime(tl ?? 0)}`;
   const hp = mine ? Math.max(0, mine[4]) : 0, sh = mine ? mine[6] : 0, flags = mine ? mine[7] : 0;
   const myMeta = meta.players.find(p => p.id === myId);
   const html = `
@@ -935,7 +935,7 @@ function renderHome() {
           <li><b>בטלפון:</b> אגודל שמאל על חצי המסך השמאלי – תזוזה. אגודל ימין על החצי הימני – כיוון ויריה (נגיעה בלי לגרור יורה על האויב הקרוב).</li>
           <li><b>במחשב:</b> WASD או החצים לתזוזה, העכבר לכיוון, לחיצה (או רווח) ליריה.</li>
           <li><b>קרב חופשי:</b> 2.5 דקות, חוזרים לזירה אחרי פגיעה. הכי הרבה פגיעות מנצח.</li>
-          <li><b>אחרון שורד:</b> אין חזרה. האזור הבטוח מתכווץ – מחוץ לו מאבדים חיים.</li>
+          <li><b>אחרון שורד:</b> אין חזרה. האזור האדום סוגר על הזירה – מחוץ לאזור הבטוח מאבדים חיים. הוא נסגר לגמרי אחרי 15 שניות לכל שחקן (2 שחקנים: 30 שניות, 3: 45 שניות…).</li>
           <li><b>זינוק 💨:</b> כפתור הזינוק (או Shift / קליק ימני) – התחמקות מהירה, פעם ב-3 שניות.</li>
           <li><b>ראייה:</b> רואים רק את מה שמולכם ומעגל קטן סביבכם. את מי שלא רואים – אפשר לזהות לפי העקבות 👣 והצלילים.</li>
           <li><b>שיחים 🌳:</b> מי שבתוך שיח נעלם – עד שמתקרבים אליו או שהוא יורה.</li>
