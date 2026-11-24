@@ -566,10 +566,17 @@ export class Room {
       const prev = ai.prev[target.id];
       const vx = prev ? (target.x - prev.x) / TICK : 0, vy = prev ? (target.y - prev.y) / TICK : 0;
       ai.prev = { [target.id]: { x: target.x, y: target.y } };
-      const lead = (dist / BULLET_SPEED) * 0.8;
-      ai.wobble = (ai.wobble || 0) * 0.9 + (Math.random() - 0.5) * 0.07;
-      want = Math.atan2(target.y + vy * lead - p.y, target.x + vx * lead - p.x) + ai.wobble;
-      turn = 0.3;
+      // human-like aim: a new error for every shot (bigger when far away), and a rough guess of
+      // where a moving target will be – so bots miss a fair share of their shots
+      if (ai.err === undefined || ai.errFor !== ai.shotNo) {
+        ai.errFor = ai.shotNo;
+        const gauss = (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
+        ai.err = gauss * (0.11 + dist * 0.00026);
+        ai.leadK = Math.random() * 1.1;
+      }
+      const lead = (dist / BULLET_SPEED) * ai.leadK;
+      want = Math.atan2(target.y + vy * lead - p.y, target.x + vx * lead - p.x) + ai.err;
+      turn = 0.22;
     } else if (look && Math.hypot(look.x - p.x, look.y - p.y) > 40) {
       want = Math.atan2(look.y - p.y, look.x - p.x);
       turn = ai.heard?.hit ? 0.25 : 0.15;
@@ -579,7 +586,8 @@ export class Room {
     let da = want - p.input.a;
     da = Math.atan2(Math.sin(da), Math.cos(da));
     p.input.a += da * turn;
-    p.input.f = fight && dist < 650 && ai.seen > 0.4 && Math.abs(da) < 0.25 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
+    p.input.f = fight && dist < 620 && ai.seen > 0.6 && Math.abs(da) < 0.12 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
+    if (p.input.f && p.cd <= 0) ai.shotNo = (ai.shotNo || 0) + 1; // fires this tick: next shot gets a new error
   }
 
   // Can a player walk straight from a to b? (checks the two edges of the body, not just the middle)
