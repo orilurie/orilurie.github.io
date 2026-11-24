@@ -3,18 +3,18 @@
 // shots so controls feel instant, and interpolates everyone else ~110 ms in the past.
 
 import {
-  W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
+  W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, INTERP_MS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=45';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=45';
-import * as gfx from './arena-gfx.js?v=45';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=45';
-import { sound } from './arena-audio.js?v=45';
+} from './arena-core.js?v=46';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=46';
+import * as gfx from './arena-gfx.js?v=46';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=46';
+import { sound } from './arena-audio.js?v=46';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 45;
+export const VERSION = 46;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -111,7 +111,7 @@ function open() {
 
 function send(msg) { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)); }
 
-setInterval(() => send({ t: 'ping', c: performance.now() }), 4000);
+setInterval(() => send({ t: 'ping', c: performance.now() }), 2000);
 
 function leave(err = '') {
   wantOpen = false;
@@ -125,7 +125,7 @@ function leave(err = '') {
 
 function onMsg(m) {
   if (m.t === 'welcome') { myId = m.id; ui.reconnecting = false; return; }
-  if (m.t === 'pong') { rtt = performance.now() - m.c; return; }
+  if (m.t === 'pong') { const r = performance.now() - m.c; rtt = rtt ? rtt * 0.7 + r * 0.3 : r; return; }
   if (m.t === 'err') { toast(m.m); if (m.fatal) leave(m.m); return; }
   if (m.t === 'emo') return;
   if (m.t === 'room') {
@@ -362,7 +362,7 @@ function stepLocal(dt) {
   if (inGame() && ((outbox.length && (urgent || now - lastSent >= 50)) || now - lastSent > 250)) {
     sentF = input.f;
     lastSent = now;
-    send({ t: 'in', a: input.a, f: input.f ? 1 : 0, c: outbox.splice(0) });
+    send({ t: 'in', a: input.a, f: input.f ? 1 : 0, c: outbox.splice(0), r: Math.round(rtt) }); // r: lets the server compensate for your ping
   }
 
   // predicted bullets
@@ -389,7 +389,7 @@ function stepLocal(dt) {
 
 // ---------------------------------------------------------------------------------------------
 // Interpolation of other players
-const INTERP = 75; // ms
+const INTERP = INTERP_MS; // ms (the server's lag compensation assumes the same value)
 function interpolate(now) {
   others = [];
   if (!snaps.length) return;
@@ -810,7 +810,7 @@ function renderHud() {
       <span><button class="ar-x" data-act="quit" aria-label="יציאה">✕</button>
       <button class="ar-x" data-act="sound" aria-label="צליל">${sfxSettings.sound ? '🔊' : '🔇'}</button></span>
       <div class="ar-time">${top}</div>
-      <div class="ar-me">💀 ${myMeta?.k ?? 0}</div>
+      <div class="ar-me">💀 ${myMeta?.k ?? 0}<small class="ar-ping ${rtt > 180 ? 'bad' : rtt > 100 ? 'mid' : ''}">📶 ${Math.round(rtt)}</small></div>
     </div>
     <div class="ar-board">${players.map(p => `<div class="${p.id === myId ? 'ar-mine' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}<b>${p.k}</b></div>`).join('')}</div>
     <div class="ar-feed">${feed.map(f => `<div><span style="color:${colorOf(f.a)}">${f.a ? esc(nameOf(f.a)) : '☠️ האזור'}</span> 🔫 <span style="color:${colorOf(f.v)}">${esc(nameOf(f.v))}</span></div>`).join('')}</div>

@@ -52,3 +52,5 @@ body.ar-playing { overflow: hidden; overscroll-behavior: none; touch-action: non
 .ar-xp .bar i, .ar-level .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb02e, #ff8a3d); }
 .ar-announce.small { font-size: 1.05rem; white-space: normal; width: max-content; max-width: 90vw; text-align: center; }
 .ar-tip { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 40px); left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55); padding: 6px 12px; border-radius: 12px; font-size: .8rem; font-weight: 600; width: max-content; max-width: 92vw; text-align: center; }
+.ar-ping { display: block; font-size: .62rem; font-weight: 600; opacity: .85; text-align: center; }
+.ar-ping.mid { color: #ffd27a; } .ar-ping.bad { color: #ff8a8a; }

@@ -11,6 +11,7 @@ export const FIRE_CD = 0.45; // seconds between shots
 export const DMG = 25;
 export const MAX_HP = 100;
 export const TICK = 1 / 30;
+export const INTERP_MS = 75; // clients draw other players this far in the past (smooth movement)
 export const MAX_PLAYERS = 6;
 export const DM_TIME = 150; // free-for-all round length, seconds
 export const RESPAWN = 2.5;

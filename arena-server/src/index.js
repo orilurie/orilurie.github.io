@@ -5,7 +5,7 @@
 import {
   W, H, R, SPEED, BULLET_R, FIRE_CD, DMG, MAX_HP, TICK, MAX_PLAYERS, DM_TIME, RESPAWN, SPAWN_SHIELD,
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
-  canSee, STEP, NEAR, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
+  canSee, STEP, NEAR, INTERP_MS, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
 } from '../../game-night/arena-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
@@ -193,6 +193,7 @@ export class Room {
         // [seq, mx, my, dt, dash]. The server replays exactly those steps, so your own
         // prediction and the server agree (the classic client-prediction model).
         p.input = { ...p.input, a: Number(msg.a) || 0, f: !!msg.f };
+        if (Number.isFinite(msg.r)) p.rtt = Math.max(0, Math.min(400, msg.r)); // client's measured round trip, ms
         if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) this.applyCmd(p, c);
         return;
       }
@@ -389,6 +390,7 @@ export class Room {
     if (this.phase !== 'count' && this.phase !== 'play') return;
     this.t += TICK;
     this.tickNo++;
+    this.recordHistory();
     if (this.phase === 'count' && this.t >= this.countEnd) { this.phase = 'play'; this.emit({ k: 'go' }); this.sendMeta(); }
     const playing = this.phase === 'play';
     const walls = this.walls;
@@ -436,7 +438,8 @@ export class Room {
         const w = WEAPONS[p.weapon];
         p.cd = w.cd + (p.bot ? BOT_LEVELS[this.botLevel].extraCd : 0);
         p.lastShotT = this.t;
-        for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple, p.weapon, p.shotNo++)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id });
+        const lag = this.shooterLag(p);
+        for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple, p.weapon, p.shotNo++)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id, lag });
         this.emit({ k: 'shot', id: p.id, x: r1(p.x), y: r1(p.y), w: WEAPON_LIST.indexOf(p.weapon) });
         if (Number.isFinite(p.ammo) && --p.ammo <= 0) { p.weapon = 'pistol'; p.ammo = Infinity; this.emit({ k: 'empty', id: p.id }); }
         for (const o of this.players.values()) {
@@ -470,7 +473,9 @@ export class Room {
         if (alive) {
           for (const p of this.players.values()) {
             if (!p.alive || p.id === b.owner) continue;
-            if (segDist(b.px, b.py, b.x, b.y, p.x, p.y) > R + BULLET_R) continue;
+            // lag compensation: test against where the target was on the shooter's screen
+            const [tx, ty] = b.lag ? this.posAt(p, this.t - b.lag) : [p.x, p.y];
+            if (segDist(b.px, b.py, b.x, b.y, tx, ty) > R + BULLET_R) continue;
             alive = false;
             if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); break; }
             this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y), dmg: b.dmg || DMG });
@@ -579,6 +584,40 @@ export class Room {
     }
   }
 
+  // ---------- lag compensation ----------
+  // A short history of everyone's positions (≈0.7 s) lets the server look back in time.
+  recordHistory() {
+    if (this.phase !== 'play') { this.hist = []; return; }
+    const pos = {};
+    for (const p of this.players.values()) if (p.alive) pos[p.id] = [p.x, p.y];
+    (this.hist ||= []).push({ t: this.t, pos });
+    if (this.hist.length > 22) this.hist.shift();
+  }
+  posAt(p, t) {
+    const h = this.hist || [];
+    for (let i = h.length - 1; i >= 0; i--) {
+      if (h[i].t > t) continue;
+      const a = h[i].pos[p.id], nb = h[i + 1], b = nb?.pos[p.id];
+      if (!a) return [p.x, p.y];
+      if (!b) return a;
+      const k = (t - h[i].t) / (nb.t - h[i].t);
+      return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    }
+    return h[0]?.pos[p.id] || [p.x, p.y];
+  }
+  // How far back the shooter's screen is: a full round trip plus the display delay.
+  shooterLag(p) {
+    if (p.bot) return 0;
+    return Math.min(0.25, (p.rtt || 0) / 1000 + INTERP_MS / 1000 + TICK / 2);
+  }
+  // What a bot "sees" of player o: humans as they were half a round trip + display delay ago
+  // (their server position already trails their own screen by the other half).
+  perceived(o) {
+    if (o.bot) return o;
+    const [x, y] = this.posAt(o, this.t - Math.min(0.25, (o.rtt || 0) / 2000 + INTERP_MS / 1000));
+    return { id: o.id, x, y, lastShotT: o.lastShotT, alive: true };
+  }
+
   // Can viewer v see player o? Vision cone + walls, and a bush hides you unless someone is very
   // close or you just fired.
   visible(v, o) {
@@ -593,8 +632,11 @@ export class Room {
   botThink(p) {
     const ai = p.ai, walls = this.walls, L = BOT_LEVELS[this.botLevel];
     let target = null, td = Infinity;
-    for (const o of this.players.values()) {
-      if (!o.alive || o === p || !this.visible(p, o)) continue;
+    for (const real of this.players.values()) {
+      if (!real.alive || real === p) continue;
+      // bots see people with the same delay people see bots (ping + display smoothing)
+      const o = this.perceived(real);
+      if (!this.visible(p, o)) continue;
       if (Math.hypot(o.x - p.x, o.y - p.y) > 720 * L.view) continue; // weaker bots see less far
       const d = Math.hypot(o.x - p.x, o.y - p.y);
       if (d < td) { td = d; target = o; }
