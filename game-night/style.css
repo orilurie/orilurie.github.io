@@ -698,26 +698,46 @@ html[data-gfx="rich"] .table {
   box-shadow: inset 0 0 0 6px #6b3f22, inset 0 0 0 9px #8a5530, inset 0 8px 30px rgba(0, 0, 0, .35), 0 6px 18px rgba(0, 0, 0, .2);
 }
 
-/* חתחתול cards */
+/* חתחתול cards: a different 3D cat or mouse per number, numbers in the corners like real cards */
+.card .corner2 { display: none; }
 html[data-gfx="rich"] .card.num, html[data-gfx="rich"] .card.power {
-  background: linear-gradient(160deg, #fff, #f6efe4);
   border: 2px solid #fff;
-  box-shadow: inset 0 0 0 3px var(--ring, #f2b27a), 0 4px 12px rgba(0, 0, 0, .22);
+  box-shadow: inset 0 0 0 2px var(--ring), 0 4px 12px rgba(0, 0, 0, .25);
+  justify-content: center; overflow: hidden;
 }
-html[data-gfx="rich"] .card.num.cat { --ring: #f5a96a; color: #c4631a; }
-html[data-gfx="rich"] .card.num.mouse { --ring: #9db4dc; color: #3d5788; }
-html[data-gfx="rich"] .card.power { --ring: #c7a2f2; color: #6c33b5; }
-html[data-gfx="rich"] .card.num span, html[data-gfx="rich"] .card.power b { display: none; }
-html[data-gfx="rich"] .card .art { display: block; width: calc(var(--w) * .5); height: calc(var(--w) * .5); filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); pointer-events: none; }
-html[data-gfx="rich"] .card.num b { text-shadow: 0 2px 0 rgba(0, 0, 0, .08); }
-html[data-gfx="rich"] .card.power .art { width: calc(var(--w) * .58); height: calc(var(--w) * .58); }
-html[data-gfx="rich"] .card.xs .art { display: none; }
-html[data-gfx="rich"] .card.xs.power b { display: block; font-size: calc(var(--w) * .45); }
+html[data-gfx="rich"] .card.num.cat {
+  --ring: #f0a35c; color: #b5520f;
+  background: radial-gradient(circle at 50% 30%, #ffe2b8, #ffc27f 70%, #f5a15a);
+}
+html[data-gfx="rich"] .card.num.mouse {
+  --ring: #8fa7d6; color: #34508a;
+  background: radial-gradient(circle at 50% 30%, #e3eaf9, #bccbec 70%, #9fb3e0);
+}
+html[data-gfx="rich"] .card.power { --ring: #b98ae8; color: #6c33b5; background: radial-gradient(circle at 50% 30%, #f4e9ff, #dcc3f7 70%, #c9a6f0); }
+html[data-gfx="rich"] .card.num b, html[data-gfx="rich"] .card.num span, html[data-gfx="rich"] .card.power b { display: none; }
+html[data-gfx="rich"] .card.num .corner, html[data-gfx="rich"] .card.num .corner2 {
+  display: block; position: absolute; font-style: normal; font-weight: 900; line-height: 1; opacity: 1;
+  font-size: calc(var(--w) * .27); text-shadow: 0 1px 0 #fff, 0 0 6px rgba(255, 255, 255, .9);
+}
+html[data-gfx="rich"] .card.num .corner { top: calc(var(--w) * .05); right: calc(var(--w) * .08); }
+html[data-gfx="rich"] .card.num .corner2 { bottom: calc(var(--w) * .05); left: calc(var(--w) * .08); transform: rotate(180deg); }
+html[data-gfx="rich"] .card .art { display: block; width: calc(var(--w) * .78); height: calc(var(--w) * .78); margin-top: calc(var(--w) * .1); filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .25)); pointer-events: none; }
+html[data-gfx="rich"] .card.power .art { width: calc(var(--w) * .62); height: calc(var(--w) * .62); margin-top: 0; }
+html[data-gfx="rich"] .card.power small { font-weight: 800; }
+html[data-gfx="rich"] .card.sm .art { margin-top: calc(var(--w) * .16); }
+html[data-gfx="rich"] .card.xs .art { width: calc(var(--w) * .8); height: calc(var(--w) * .8); margin-top: calc(var(--w) * .2); }
+html[data-gfx="rich"] .card.xs .corner, html[data-gfx="rich"] .card.xs .corner2 { font-size: calc(var(--w) * .34); }
+html[data-gfx="rich"] .card.xs.power .art { margin-top: 0; }
 html[data-gfx="rich"] .card.back {
-  background: url(art/cards/cardBack_red2.png) center / cover, var(--back);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 220, 150, .35) 0 30%, transparent 31%),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, .07) 0 6px, transparent 6px 12px),
+    radial-gradient(circle at 50% 40%, #b8324a, #7a1630);
   border: 2px solid #fff;
+  box-shadow: inset 0 0 0 4px #7a1630, inset 0 0 0 5px #e9b763, 0 4px 12px rgba(0, 0, 0, .25);
 }
 html[data-gfx="rich"] .card.back span { display: none; }
+html[data-gfx="rich"] .card.back .art { width: calc(var(--w) * .62); height: calc(var(--w) * .62); margin-top: 0; }
 
 /* רביעיות: real card faces */
 html[data-gfx="rich"] .pcard:not(.back) { background: transparent; box-shadow: 0 2px 6px rgba(0, 0, 0, .22); overflow: hidden; }

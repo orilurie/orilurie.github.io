@@ -1,14 +1,14 @@
-import * as Hathatul from './game.js?v=43';
-import * as Quartets from './quartets.js?v=43';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=43';
-import * as Battleship from './battleship.js?v=43';
-import * as Imposter from './imposter.js?v=43';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=43';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=43';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=43';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=43';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=43';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=43';
+import * as Hathatul from './game.js?v=45';
+import * as Quartets from './quartets.js?v=45';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=45';
+import * as Battleship from './battleship.js?v=45';
+import * as Imposter from './imposter.js?v=45';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=45';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=45';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=45';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=45';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=45';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=45';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -19,7 +19,7 @@ const GAMES = {
   imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', art: 'detective', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 43; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 45; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -408,14 +408,14 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 
 function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) {
   const attrs = `${act ? `data-act="${act}" role="button" tabindex="0"` : ''} ${data} ${k ? `data-k="${k}"` : ''}`;
-  if (!c) return `<div class="card back ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><span>🐾</span></div>`;
+  if (!c) return `<div class="card back ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><span>🐾</span><img class="art" src="art/hc/back.webp" alt="" draggable="false"></div>`;
   if (c.kind === 'power') {
     const p = POWERS[c.power];
     return `<div class="card power ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><b>${p.icon}</b><img class="art" src="art/${{ peek: 'eyes', swap: 'swap', draw2: 'victory' }[c.power]}.png" alt="" draggable="false"><small>${p.label}</small></div>`;
   }
   const cat = c.value <= 6;
   return `<div class="card num ${cat ? 'cat' : 'mouse'} ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}>
-    <i class="corner">${c.value}</i><b>${c.value}</b><span>${cat ? '🐱' : '🐭'}</span><img class="art" src="art/${cat ? 'cat' : 'mouse'}.png" alt="" draggable="false"></div>`;
+    <i class="corner">${c.value}</i><b>${c.value}</b><span>${cat ? '🐱' : '🐭'}</span><img class="art" src="art/hc/${c.value}.webp" alt="" draggable="false"><i class="corner2">${c.value}</i></div>`;
 }
 
 function render() {
