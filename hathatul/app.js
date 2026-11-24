@@ -1,13 +1,13 @@
-import * as Hathatul from './game.js?v=32';
-import * as Quartets from './quartets.js?v=32';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=32';
-import * as Battleship from './battleship.js?v=32';
-import * as Imposter from './imposter.js?v=32';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=32';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=32';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=32';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=32';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=32';
+import * as Hathatul from './game.js?v=33';
+import * as Quartets from './quartets.js?v=33';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=33';
+import * as Battleship from './battleship.js?v=33';
+import * as Imposter from './imposter.js?v=33';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=33';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=33';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=33';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=33';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=33';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -18,7 +18,7 @@ const GAMES = {
   imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 32; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 33; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.

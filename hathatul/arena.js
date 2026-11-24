@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist,
-} from './arena-core.js?v=32';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=32';
-import { sound } from './arena-audio.js?v=32';
+} from './arena-core.js?v=33';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=33';
+import { sound } from './arena-audio.js?v=33';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 32;
+export const VERSION = 33;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -743,6 +743,7 @@ function renderHome() {
           <li><b>אחרון שורד:</b> אין חזרה. האזור הבטוח מתכווץ – מחוץ לו מאבדים חיים.</li>
           <li><b>בונוסים:</b> ❤️ חיים · 🛡️ מגן · 🔱 ירייה משולשת · ⚡ מהירות.</li>
           <li>אין מספיק חברים? המארח יכול להוסיף בוטים 🤖.</li>
+          <li>🔊 <a href="sounds.html">לשמוע את הצלילים ולבחור צליל יריה</a></li>
         </ul>
       </details>
       <p class="version">גרסה ${VERSION}</p>

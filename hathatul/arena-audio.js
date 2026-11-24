@@ -1,17 +1,24 @@
 // זירה – recorded sound effects (CC0, see sounds/CREDITS.txt) with simple positional audio:
 // sounds from far away are quieter and duller, and pan left/right by where they happen.
 
-import { settings } from './sfx.js?v=32';
+import { settings } from './sfx.js?v=33';
+
+// Which gunshot to use: picked on sounds.html (saved per device), default 1.
+export function gunChoice() {
+  let n = 1;
+  try { n = Number(localStorage.getItem('arena-gun')) || 1; } catch {}
+  return n >= 1 && n <= 8 ? n : 1;
+}
 
 const FILES = {
-  shot: ['shot1', 'shot2', 'shot3'],
+  shot: [`candidates/gun${gunChoice()}`],
   hit: ['hit1', 'hit2', 'hit3'],
   hurt: ['hurt1', 'hurt2'],
   wall: ['wall1', 'wall2', 'wall3'],
   step: ['step1', 'step2', 'step3', 'step4', 'step5'],
   die: ['die'], block: ['block'], kill: ['kill'], pickup: ['pickup'], count: ['count'], go: ['go'],
 };
-const BASE_VOL = { shot: 0.55, hit: 0.8, hurt: 0.9, wall: 0.25, step: 0.35, die: 0.8, block: 0.4, kill: 0.6, pickup: 0.6, count: 0.5, go: 0.6 };
+const BASE_VOL = { shot: 0.6, hit: 0.8, hurt: 0.9, wall: 0.25, step: 0.35, die: 0.8, block: 0.4, kill: 0.6, pickup: 0.6, count: 0.5, go: 0.6 };
 
 let ctx = null, master = null;
 const buffers = {};
@@ -75,18 +82,4 @@ export function sound(name, { at = null, listener = null, vol = 1 } = {}) {
   }
   node.connect(master);
   src.start();
-  // the recorded shot is a sharp crack; add a short low thump so it has some body
-  if (name === 'shot') {
-    const t = ctx.currentTime, o = ctx.createOscillator(), og = ctx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(140, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
-    og.gain.setValueAtTime(0.0001, t);
-    og.gain.exponentialRampToValueAtTime(gain * 0.9, t + 0.005);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    let on = o.connect(og);
-    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; on = on.connect(p); }
-    on.connect(master);
-    o.start(t); o.stop(t + 0.16);
-  }
 }

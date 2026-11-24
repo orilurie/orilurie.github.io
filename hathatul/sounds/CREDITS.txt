@@ -1,3 +1,7 @@
 Sounds used by the arena game (זירה). All are CC0 (public domain):
-- shot*.mp3: "Gunshots" by an OpenGameArt user, https://opengameart.org/content/gunshots (CC0), trimmed
+- candidates/gun1..8.mp3 (gunshots, trimmed and normalized), all CC0 from freesound.org:
+  1 "Layered Gunshot 8" by Xenonn (128302) · 2 "Pistol Shot" by LeMudCrab (163456) ·
+  3 "9mm pistol shot" by michorvath (427592) · 4 "AR15 pistol shot" by michorvath (427598) ·
+  5 "Single Pistol Gunshot 3" by morganpurkis (385811) · 6 "Heathers Gunshot Effect2" by okieactor (415912) ·
+  7 "Gunshot_002" by Brokenphono (344142) · 8 "GUNSHOT.WAV" by erkanozan (51749)
 - everything else: Kenney (www.kenney.nl) – Impact Sounds, Sci-Fi Sounds, Interface Sounds (CC0), converted to mp3

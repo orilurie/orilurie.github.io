@@ -1,6 +1,6 @@
 // חתחתול – game rules. Pure state machine, runs on the host only.
 
-import { shuffle, fairOrder } from './util.js?v=32';
+import { shuffle, fairOrder } from './util.js?v=33';
 
 export const POWERS = {
   peek: { label: 'הצצה', icon: '👁️' },
