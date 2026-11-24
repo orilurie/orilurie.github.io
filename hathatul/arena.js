@@ -4,15 +4,15 @@
 
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
-  move, shotBullets, stepBullet, blocked, rayDist,
-} from './arena-core.js?v=33';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=33';
-import { sound } from './arena-audio.js?v=33';
+  move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
+} from './arena-core.js?v=34';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=34';
+import { sound } from './arena-audio.js?v=34';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 33;
+export const VERSION = 34;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -40,6 +40,10 @@ if (!pid) {
   try { sessionStorage.setItem('arena-pid', pid); } catch {}
 }
 
+// Your level grows with XP earned in matches (kept on this device).
+const xpGet = () => Number(store.get('arena-xp')) || 0;
+const levelOf = xp => Math.floor(Math.sqrt(xp / 25)) + 1;
+const levelProgress = xp => { const l = levelOf(xp), a = 25 * (l - 1) ** 2, b = 25 * l ** 2; return (xp - a) / (b - a); };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $app = document.getElementById('app');
 const $game = document.getElementById('game');
@@ -91,7 +95,7 @@ function open() {
   ws = sock;
   sock.onopen = () => {
     retry = 0;
-    sock.send(JSON.stringify({ t: 'hello', id: pid, name: ui.name }));
+    sock.send(JSON.stringify({ t: 'hello', id: pid, name: ui.name, lvl: levelOf(xpGet()) }));
   };
   sock.onmessage = e => { if (sock === ws) onMsg(JSON.parse(e.data)); };
   sock.onclose = () => {
@@ -127,10 +131,18 @@ function onMsg(m) {
     meta = m;
     if (ui.screen !== 'room') { ui.screen = 'room'; }
     if (m.phase === 'count' && prevPhase !== 'count') resetRound();
-    if (m.phase === 'end' && prevPhase !== 'end') {
+    if (m.phase === 'count') ui.endDone = false;
+    if (m.phase === 'end' && m.results && !ui.endDone) {
+      ui.endDone = true;
       const mine = m.results?.find(r => r.id === myId);
-      if (mine) { play(mine.place === 1 ? 'win' : 'lose'); haptic(mine.place === 1 ? 'win' : 'tap'); }
+      if (mine) {
+        play(mine.place === 1 ? 'win' : 'lose'); haptic(mine.place === 1 ? 'win' : 'tap');
+        const before = xpGet(), gain = 5 + mine.kills * 10 + (mine.place === 1 ? 25 : mine.place === 2 ? 10 : 0);
+        store.set('arena-xp', before + gain);
+        ui.xp = { gain, before, after: before + gain };
+      } else ui.xp = null;
     }
+    ui.nextAt = m.next != null ? performance.now() + m.next * 1000 : null;
     render();
     return;
   }
@@ -164,11 +176,24 @@ addEventListener('keydown', e => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('keydown', e => { if (inGame() && (e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) dashPress(); });
+let dashCount = 0, localDash = { t: 0, cd: 0, dir: null };
+function dashPress() {
+  if (!me || me.dead || localDash.cd > 0 || lastSnap?.ph !== 'play') return;
+  const l = Math.hypot(input.mx, input.my);
+  const a = l > 0.2 ? Math.atan2(input.my, input.mx) : input.a;
+  localDash = { t: DASH.time, cd: DASH.cd, dir: { mx: Math.cos(a), my: Math.sin(a) } };
+  dashCount++;
+  lastSent = 0; // send right away
+  sound('dash');
+  haptic('tap');
+}
 addEventListener('blur', () => { keys.clear(); sticks.move = sticks.aim = null; if (mouse) mouse.down = false; });
 
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (e.pointerType === 'mouse') {
+    if (e.button === 2) { dashPress(); return; }
     mouse = { x: e.clientX, y: e.clientY, down: e.button === 0 };
     return;
   }
@@ -239,14 +264,22 @@ function autoTarget(me) {
 let seq = 0, lastSent = 0, sentKey = '';
 const pending = []; // { seq, mx, my, dt, mul }
 let me = null; // predicted { x, y }
-let localCd = 0;
+let localCd = 0, myShotNo = 0, kick = 0;
+const ghosts = []; // dash after-images
+const flashes = []; // muzzle flashes
+const holes = []; // bullet marks on walls
+const hitAt = {}; // id -> time of last hit (white flash)
+let announce = null; // { text, life }
+let killerId = null; // who got you (the camera follows them while you wait)
+let zoomKick = 0;
 let myBullets = [];
 let others = []; // interpolated players for this frame
 const walls = () => MAPS[meta?.map ?? 0].walls;
 const myServer = () => lastSnap?.p.find(p => p[0] === myId);
 
 function resetRound() {
-  footprints.length = 0;
+  footprints.length = 0; ghosts.length = 0; flashes.length = 0; holes.length = 0; announce = null; killerId = null;
+  localDash = { t: 0, cd: 0, dir: null }; dashCount = 0;
   me = null; pending.length = 0; myBullets = []; particles.length = 0; floaters.length = 0; feed.length = 0;
   snaps.length = 0; lastSnap = null; seenEv = new Set();
 }
@@ -271,16 +304,19 @@ function stepLocal(dt) {
   readInput(me && !me.dead ? me : null);
   // send input ~15 times a second while it changes, and at least every 250 ms
   const now = performance.now();
-  const key = `${input.mx},${input.my},${input.a},${input.f}`;
+  const key = `${input.mx},${input.my},${input.a},${input.f},${dashCount}`;
   if (inGame() && ((key !== sentKey && now - lastSent > 66) || now - lastSent > 250)) {
     seq++;
     sentKey = key;
     lastSent = now;
-    send({ t: 'in', s: seq, mx: input.mx, my: input.my, a: input.a, f: input.f ? 1 : 0 });
+    send({ t: 'in', s: seq, mx: input.mx, my: input.my, a: input.a, f: input.f ? 1 : 0, d: dashCount });
   }
   if (me && !me.dead && sp && sp[5] && playing) {
-    const mul = sp[7] & 2 ? 1.4 : 1;
-    const u = { seq, mx: input.mx, my: input.my, dt, mul };
+    localDash.cd -= dt;
+    let u;
+    if (localDash.t > 0) { localDash.t -= dt; u = { seq, ...localDash.dir, dt, mul: DASH.speed }; ghosts.push({ x: me.x, y: me.y, id: myId, life: 0.25 }); }
+    else { const mul = sp[7] & 2 ? 1.4 : 1; u = { seq, mx: input.mx, my: input.my, dt, mul }; }
+    const mul = u.mul;
     const bx = me.x, by = me.y;
     move(me, u, dt, walls(), mul);
     me.walked = (me.walked || 0) + Math.hypot(me.x - bx, me.y - by);
@@ -292,16 +328,24 @@ function stepLocal(dt) {
     me.cx -= me.cx * k; me.cy -= me.cy * k;
     // own shots appear instantly
     localCd -= dt;
+    const wname = WEAPON_LIST[lastSnap?.me?.w ?? 0] || 'pistol';
     if (input.f && localCd <= 0) {
-      localCd = FIRE_CD;
-      for (const b of shotBullets(me.x, me.y, input.a, sp[7] & 1)) myBullets.push(b);
-      sound('shot');
+      const w = WEAPONS[wname];
+      localCd = w.cd;
+      for (const b of shotBullets(me.x, me.y, input.a, sp[7] & 1, wname, myShotNo++)) myBullets.push(b);
+      sound(wname === 'pistol' ? 'shot' : `shot_${wname}`);
+      kick = w.kick;
+      shake = Math.min(16, shake + w.kick * 0.6);
+      flashes.push({ x: me.x, y: me.y, a: input.a, life: 0.06, big: wname === 'shotgun' || wname === 'sniper' });
+      // a shell flies out to the side
+      const sa = input.a + Math.PI / 2 + (Math.random() - 0.5) * 0.6;
+      particles.push({ x: me.x, y: me.y, vx: Math.cos(sa) * 140, vy: Math.sin(sa) * 140, life: 0.5, max: 0.5, color: '#e6b94a', size: 3 });
     }
   }
 
   // predicted bullets
   myBullets = myBullets.filter(b => {
-    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); sound('wall', heardAt(b.x, b.y)); return false; }
+    if (!stepBullet(b, dt, walls())) { spark(b.x, b.y, '#ffd27a', 4); sound('wall', heardAt(b.x, b.y)); holes.push({ x: b.x - b.vx * 0.006, y: b.y - b.vy * 0.006, life: 6 }); if (holes.length > 60) holes.shift(); return false; }
     for (const o of others) {
       if (!o.alive || o.id === myId) continue;
       if (Math.hypot(o.x - b.x, o.y - b.y) < R + BULLET_R) { spark(b.x, b.y, '#fff', 6); return false; }
@@ -330,7 +374,7 @@ function interpolate(now) {
     const lerp = (x, y) => (jump ? y : x + (y - x) * k);
     let da = pb[3] - pa[3];
     da = Math.atan2(Math.sin(da), Math.cos(da));
-    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: pb[4], alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8] });
+    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: pb[4], alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8], w: WEAPON_LIST[pb[9]] || 'pistol' });
   }
 }
 
@@ -353,17 +397,28 @@ function spark(x, y, color, n = 8, speed = 160) {
   }
 }
 
+function shout(id, text) {
+  announce = { text: id === myId ? text : `${nameOf(id)}: ${text}`, life: 2.2, mine: id === myId };
+  if (id === myId) { sound('go'); haptic('win'); }
+}
+
 function handleEvents(evs) {
   for (const ev of evs) {
     switch (ev.k) {
       case 'shot':
-        if (ev.id !== myId) sound('shot', { ...heardAt(ev.x, ev.y), vol: 0.8 });
+        if (ev.id !== myId) {
+          const wn = WEAPON_LIST[ev.w] || 'pistol';
+          sound(wn === 'pistol' ? 'shot' : `shot_${wn}`, { ...heardAt(ev.x, ev.y), vol: 0.8 });
+          const o = others.find(q => q.id === ev.id);
+          if (o) flashes.push({ x: o.x, y: o.y, a: o.aim, life: 0.06, big: wn === 'shotgun' || wn === 'sniper' });
+        }
         break;
       case 'hit':
         if (ev.by !== myId) spark(ev.x, ev.y, colorOf(ev.v), 7);
         if (ev.by === myId) sound('hit');
         else if (ev.v !== myId) sound('hit', { ...heardAt(ev.x, ev.y), vol: 0.6 });
-        floaters.push({ x: ev.x, y: ev.y - 10, text: `-${DMG}`, color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
+        hitAt[ev.v] = performance.now();
+        floaters.push({ x: ev.x, y: ev.y - 10, text: `-${ev.dmg || DMG}`, color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
         if (ev.v === myId) { sound('hurt'); haptic('hurt'); shake = Math.min(14, shake + 7); hurtFlash = 0.35; }
         break;
       case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); sound('block', heardAt(ev.x, ev.y)); break;
@@ -373,14 +428,19 @@ function handleEvents(evs) {
         feed.push({ a: ev.a, v: ev.v, life: 5 });
         if (feed.length > 4) feed.shift();
         if (ev.x !== undefined && ev.v !== myId) sound('die', { ...heardAt(ev.x, ev.y), vol: 0.7 });
-        if (ev.v === myId) { sound('die'); haptic('die'); shake = 18; }
-        else if (ev.a === myId) { sound('kill'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 30, text: '💀 +1', color: '#ffd27a', life: 1.2 }); }
+        if (ev.v === myId) { sound('die'); haptic('die'); shake = 18; killerId = ev.a; }
+        else if (ev.a === myId) { sound('kill'); haptic('tap'); zoomKick = 0.07; floaters.push({ x: ev.x, y: ev.y - 30, text: '💀 +1', color: '#ffd27a', life: 1.2 }); }
         break;
       }
       case 'pick':
         spark(ev.x, ev.y, '#7dffb0', 10);
         if (ev.id === myId) { sound('pickup'); haptic('tap'); floaters.push({ x: ev.x, y: ev.y - 20, text: `${PICKUPS[ev.type].icon} ${PICKUPS[ev.type].name}`, color: '#7dffb0', life: 1.2 }); }
         break;
+      case 'dash': if (ev.id !== myId) sound('dash', { ...heardAt(ev.x, ev.y), vol: 0.7 }); break;
+      case 'empty': if (ev.id === myId) { sound('empty'); floaters.push({ x: me?.x ?? 0, y: (me?.y ?? 0) - 30, text: '🔫 חזרת לאקדח', color: '#ffd27a', life: 1.2 }); } break;
+      case 'multi': shout(ev.id, ['', '', 'דאבל קיל! ✌️', 'טריפל קיל! 🔥', 'מולטי קיל! 💥'][Math.min(4, ev.n)]); break;
+      case 'streak': shout(ev.id, `ברצף של ${ev.n}! 👑`); break;
+      case 'stop': announce = { text: `${nameOf(ev.a)} עצר/ה את הרצף של ${nameOf(ev.v)} (+1) 🛑`, life: 2.5 }; if (ev.a === myId) sound('kill'); break;
       case 'go': sound('go'); haptic('turn'); break;
       case 'spawn': break;
     }
@@ -404,13 +464,14 @@ function toScreen(x, y) { return { x: (x - view.x) * view.s + innerWidth / 2, y:
 function drawWorld(now, dt) {
   const cw = innerWidth, ch = innerHeight;
   const portrait = ch > cw;
-  view.s = portrait ? cw / 640 : Math.min(cw / 960, ch / 560);
+  view.s = (portrait ? cw / 640 : Math.min(cw / 960, ch / 560)) * (1 + zoomKick);
   // camera follows you (or, while you're out, whoever is still alive)
   let focus = me && !me.dead ? me : null;
   if (!focus) {
     const live = others.find(o => o.alive && o.id !== myId);
     const mine = others.find(o => o.id === myId);
-    focus = mine && mine.alive ? mine : live || mine || { x: W / 2, y: H / 2 };
+    const killer = killerId && others.find(o => o.id === killerId && o.alive);
+    focus = mine && mine.alive ? mine : killer || live || mine || { x: W / 2, y: H / 2 };
   }
   const halfW = cw / 2 / view.s, halfH = ch / 2 / view.s;
   const clampV = (v, half, max) => (half * 2 >= max + 160 ? max / 2 : Math.max(half - 80, Math.min(max + 80 - half, v)));
@@ -459,6 +520,12 @@ function drawWorld(now, dt) {
     g.fillStyle = '#56668f'; g.fillRect(x, y, w, 6);
     g.strokeStyle = '#2a334a'; g.lineWidth = 2; g.strokeRect(x + 1, y + 1, w - 2, h - 2);
   }
+  for (const h of holes) {
+    g.globalAlpha = Math.min(1, h.life / 2) * 0.7;
+    g.fillStyle = '#141a28';
+    g.beginPath(); g.arc(h.x, h.y, 3, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
 
   // bullets: others' from the server (extrapolated), yours predicted
   const age = s ? (now - snaps[snaps.length - 1].at) / 1000 : 0;
@@ -468,12 +535,48 @@ function drawWorld(now, dt) {
   }
   for (const b of myBullets) drawBullet(b.x, b.y, b.vx, b.vy, colorOf(myId));
 
+  // dash after-images
+  for (const gh of ghosts) {
+    g.globalAlpha = gh.life * 1.6;
+    g.fillStyle = colorOf(gh.id);
+    g.beginPath(); g.arc(gh.x, gh.y, R * 0.9, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
   // players
   for (const o of others) {
     if (!o.alive) continue;
-    const p = o.id === myId && me && !me.dead ? { ...o, x: me.x, y: me.y, aim: input.a } : o;
+    if (o.id !== myId && o.flags & 8) ghosts.push({ x: o.x, y: o.y, id: o.id, life: 0.25 });
+    const mine = o.id === myId && me && !me.dead;
+    const p = mine ? { ...o, x: me.x - Math.cos(input.a) * kick, y: me.y - Math.sin(input.a) * kick, aim: input.a, w: WEAPON_LIST[lastSnap?.me?.w ?? 0] } : o;
     drawPlayer(p, now);
   }
+  // muzzle flashes (with a little light)
+  for (const f of flashes) {
+    const len = f.big ? 34 : 22, wid = f.big ? 14 : 9;
+    const tx = f.x + Math.cos(f.a) * (R + 18), ty = f.y + Math.sin(f.a) * (R + 18);
+    const grd = g.createRadialGradient(tx, ty, 0, tx, ty, f.big ? 90 : 60);
+    grd.addColorStop(0, 'rgba(255,220,140,0.35)'); grd.addColorStop(1, 'rgba(255,220,140,0)');
+    g.fillStyle = grd; g.beginPath(); g.arc(tx, ty, f.big ? 90 : 60, 0, Math.PI * 2); g.fill();
+    g.save(); g.translate(tx, ty); g.rotate(f.a);
+    g.fillStyle = '#ffe9a8';
+    g.beginPath(); g.moveTo(0, -wid / 2); g.lineTo(len, 0); g.lineTo(0, wid / 2); g.closePath(); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(2, 0, wid / 3, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  // bushes cover whoever is inside (yours is see-through so you know where you are)
+  const meIn = me && !me.dead && inBush(me.x, me.y, meta?.map ?? 0);
+  for (const [bx, by, br] of MAPS[meta?.map ?? 0].bushes || []) {
+    const mineHere = meIn && Math.hypot(me.x - bx, me.y - by) < br;
+    g.globalAlpha = mineHere ? 0.5 : 0.95;
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + bx, rr = br * 0.55;
+      g.fillStyle = i % 2 ? '#2f7a45' : '#3a8f52';
+      g.beginPath(); g.arc(bx + Math.cos(a) * rr * 0.6, by + Math.sin(a) * rr * 0.6, rr, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = '#4aa863';
+    g.beginPath(); g.arc(bx - br * 0.15, by - br * 0.2, br * 0.45, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
 
   // particles
   for (const pt of particles) {
@@ -551,6 +654,7 @@ function drawWorld(now, dt) {
       g.restore();
     }
   }
+  drawMinimap(cw, ch);
   for (const st of Object.values(sticks)) {
     if (!st) continue;
     g.globalAlpha = 0.35;
@@ -585,6 +689,34 @@ function visionPolygon(x, y, aim) {
   return pts;
 }
 
+// Small map in the corner: walls, bushes, zone, bonuses, you, and whoever you can see.
+function drawMinimap(cw, ch) {
+  const mw = Math.min(150, cw * 0.3), k = mw / W, mh = H * k;
+  const ox = 10, oy = Math.max(8, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0) + 52;
+  g.save();
+  g.translate(ox, oy);
+  g.fillStyle = 'rgba(10,14,24,0.6)'; g.fillRect(-3, -3, mw + 6, mh + 6);
+  g.fillStyle = 'rgba(40,52,80,0.9)'; g.fillRect(0, 0, mw, mh);
+  g.beginPath(); g.rect(0, 0, mw, mh); g.clip();
+  g.fillStyle = '#7f8db3';
+  for (const [x, y, w, h] of walls()) g.fillRect(x * k, y * k, Math.max(1.5, w * k), Math.max(1.5, h * k));
+  g.fillStyle = '#3a8f52';
+  for (const [x, y, rr] of MAPS[meta?.map ?? 0].bushes || []) { g.beginPath(); g.arc(x * k, y * k, rr * k, 0, Math.PI * 2); g.fill(); }
+  const s = lastSnap;
+  if (s?.z) { g.strokeStyle = '#ff5a64'; g.lineWidth = 1.5; g.beginPath(); g.arc(s.z[0] * k, s.z[1] * k, s.z[2] * k, 0, Math.PI * 2); g.stroke(); }
+  for (const [, , x, y] of s?.u || []) { g.fillStyle = '#7dffb0'; g.fillRect(x * k - 1.5, y * k - 1.5, 3, 3); }
+  for (const o of others) {
+    if (!o.alive || o.id === myId) continue;
+    g.fillStyle = colorOf(o.id); g.beginPath(); g.arc(o.x * k, o.y * k, 3, 0, Math.PI * 2); g.fill();
+  }
+  if (me && !me.dead) {
+    g.fillStyle = 'rgba(255,255,255,0.18)';
+    g.beginPath(); g.moveTo(me.x * k, me.y * k); g.arc(me.x * k, me.y * k, 720 * k, input.a - 0.95, input.a + 0.95); g.closePath(); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(me.x * k, me.y * k, 3.5, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
 function drawBullet(x, y, vx, vy, color) {
   const l = Math.hypot(vx, vy) || 1;
   g.strokeStyle = color; g.globalAlpha = 0.45; g.lineWidth = 4;
@@ -608,11 +740,12 @@ function drawPlayer(p, now) {
   }
   // gun(s)
   g.save(); g.translate(p.x, p.y); g.rotate(p.aim);
-  const barrels = p.flags & 1 ? [-0.16, 0, 0.16] : [0];
+  const look = { pistol: [22, 10], smg: [18, 12], shotgun: [26, 14], sniper: [40, 8] }[p.w || 'pistol'] || [22, 10];
+  const barrels = p.flags & 1 && (p.w || 'pistol') !== 'shotgun' ? [-0.16, 0, 0.16] : [0];
   for (const off of barrels) {
     g.save(); g.rotate(off);
-    g.fillStyle = '#20242e'; g.fillRect(R - 6, -5, 22, 10);
-    g.fillStyle = color; g.fillRect(R + 12, -5, 4, 10);
+    g.fillStyle = '#20242e'; g.fillRect(R - 6, -look[1] / 2, look[0], look[1]);
+    g.fillStyle = color; g.fillRect(R - 10 + look[0], -look[1] / 2, 4, look[1]);
     g.restore();
   }
   g.restore();
@@ -627,6 +760,15 @@ function drawPlayer(p, now) {
     g.fillStyle = '#fff'; g.beginPath(); g.arc(p.x + ex * 0.5 + ox, p.y + ey * 0.5 + oy, 4.5, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#111'; g.beginPath(); g.arc(p.x + ex * 0.8 + ox, p.y + ey * 0.8 + oy, 2.2, 0, Math.PI * 2); g.fill();
   }
+  const since = performance.now() - (hitAt[p.id] || -1e9);
+  if (since < 110) { // white flash when hit
+    g.fillStyle = `rgba(255,255,255,${0.85 * (1 - since / 110)})`;
+    g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill();
+  }
+  if (p.flags & 16) { // on a streak
+    g.font = '18px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillStyle = '#fff';
+    g.fillText('👑', p.x, p.y - R - 26);
+  }
   if (p.flags & 4) { // spawn protection bubble
     g.strokeStyle = `rgba(159,232,255,${0.5 + Math.sin(now / 80) * 0.3})`; g.lineWidth = 3;
     g.beginPath(); g.arc(p.x, p.y, R + 7, 0, Math.PI * 2); g.stroke();
@@ -638,7 +780,8 @@ function drawPlayer(p, now) {
   // name + health
   g.font = `600 13px Rubik, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom';
   g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.6)';
-  const nm = nameOf(p.id);
+  const lv = playerById(p.id)?.lvl;
+  const nm = (lv ? `⭐${lv} ` : '') + nameOf(p.id);
   g.strokeText(nm, p.x, p.y - R - 12); g.fillStyle = '#fff'; g.fillText(nm, p.x, p.y - R - 12);
   const bw = 40;
   g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(p.x - bw / 2, p.y - R - 10, bw, 5);
@@ -660,7 +803,7 @@ function renderHud() {
   if (meta.phase === 'count' || s?.ph === 'count') center = `<div class="ar-count">${Math.max(1, Math.ceil(tl ?? 3))}</div>`;
   else if (meta.phase === 'play' && mine && !mine[5]) {
     center = meta.mode === 'dm'
-      ? `<div class="ar-msg">💥 נפגעת! חוזר/ת לזירה בעוד ${Math.ceil(mine[8] || 0)}…</div>`
+      ? `<div class="ar-msg">💥 ${killerId ? `${esc(nameOf(killerId))} פגע/ה בך!` : 'נפגעת!'} חוזר/ת לזירה בעוד ${Math.ceil(mine[8] || 0)}…</div>`
       : `<div class="ar-msg">💀 נפסלת – צופה בשאר</div>`;
   } else if (meta.phase === 'play' && !mine) center = '<div class="ar-msg">👀 צופה – תצטרפו בסיבוב הבא</div>';
   const top = meta.mode === 'dm'
@@ -678,11 +821,14 @@ function renderHud() {
     <div class="ar-board">${players.map(p => `<div class="${p.id === myId ? 'ar-mine' : ''}"><i style="background:${p.color}"></i>${esc(p.name)}<b>${p.k}</b></div>`).join('')}</div>
     <div class="ar-feed">${feed.map(f => `<div><span style="color:${colorOf(f.a)}">${f.a ? esc(nameOf(f.a)) : '☠️ האזור'}</span> 🔫 <span style="color:${colorOf(f.v)}">${esc(nameOf(f.v))}</span></div>`).join('')}</div>
     ${center}
+    ${announce ? `<div class="ar-announce ${announce.mine ? 'mine' : ''}">${esc(announce.text)}</div>` : ''}
     ${ui.reconnecting ? '<div class="ar-msg warn">📡 מתחבר מחדש…</div>' : ''}
     ${mine && mine[5] && meta.phase === 'play' ? `<div class="ar-bottom">
       <div class="ar-hp"><div style="width:${hp}%"></div>${sh ? `<div class="sh" style="width:${sh}%"></div>` : ''}<span>❤️ ${hp}${sh ? ` 🛡️ ${sh}` : ''}</span></div>
       <div class="ar-buffs">${flags & 1 ? '🔱' : ''}${flags & 2 ? '⚡' : ''}</div>
-    </div>` : ''}
+      ${(() => { const w = WEAPON_LIST[s?.me?.w ?? 0] || 'pistol'; const am = s?.me?.am ?? -1; return `<div class="ar-weapon">${WEAPONS[w].icon} ${WEAPONS[w].name}${am >= 0 ? ` · ${am}` : ''}</div>`; })()}
+    </div>
+    <button class="ar-dash ${localDash.cd > 0 ? 'cd' : ''}" data-act="dash" aria-label="זינוק">💨<small>${localDash.cd > 0 ? Math.ceil(localDash.cd) : (matchMedia('(pointer: fine)').matches ? 'Shift' : '')}</small></button>` : ''}
     ${meta.phase === 'end' ? endHtml() : ''}`;
   if (html !== hudKey) { $hud.innerHTML = html; hudKey = html; }
 }
@@ -697,7 +843,9 @@ function endHtml() {
   return `<div class="ar-end"><div class="panel">
     <h2>${win?.id === myId ? '🏆 ניצחת!' : `🏆 ${esc(win?.name || '')} ניצח/ה!`}</h2>
     <table class="ar-res"><tr><th></th><th>שחקן</th><th>💀</th><th>☠️</th></tr>${rows}</table>
-    ${isHost ? `<button class="primary" data-act="start">🔁 סיבוב נוסף</button><button class="ghost" data-act="toLobby">⚙️ הגדרות</button>` : '<p class="sub">מחכים למארח/ת…</p>'}
+    ${ui.xp ? `<div class="ar-xp"><div>+${ui.xp.gain} XP · רמה ${levelOf(ui.xp.after)}${levelOf(ui.xp.after) > levelOf(ui.xp.before) ? ' 🎉 עלית רמה!' : ''}</div><div class="bar"><i style="width:${Math.round(levelProgress(ui.xp.after) * 100)}%"></i></div></div>` : ''}
+    ${ui.nextAt ? `<p class="sub">⏭️ הסיבוב הבא מתחיל בעוד ${Math.max(0, Math.ceil((ui.nextAt - performance.now()) / 1000))}</p>` : ''}
+    ${isHost ? `<button class="primary" data-act="start">🔁 סיבוב נוסף עכשיו</button><button class="ghost" data-act="toLobby">⚙️ הגדרות (עצירה)</button>` : (ui.nextAt ? '' : '<p class="sub">מחכים למארח/ת…</p>')}
     <button class="ghost" data-act="quit">יציאה</button>
   </div></div>`;
 }
@@ -726,6 +874,7 @@ function renderHome() {
       <p class="sub">קרב יריות בזמן אמת, 2 עד 6 שחקנים. כל אחד לעצמו – מי יישאר אחרון?</p>
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
       <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
+      <div class="ar-level">⭐ רמה ${levelOf(xpGet())}<div class="bar"><i style="width:${Math.round(levelProgress(xpGet()) * 100)}%"></i></div></div>
       ${ui.joinCode ? `<button class="primary" data-act="join" ${ui.busy ? 'disabled' : ''}>הצטרף לחדר ${esc(ui.joinCode)}</button><div class="or">או</div>` : ''}
       <button class="${ui.joinCode ? '' : 'primary'}" data-act="quick" ${ui.busy ? 'disabled' : ''}>⚡ משחק מהיר</button>
       <p class="hint">נכנסים לחדר פתוח עם מי שמחובר עכשיו (או פותחים אחד חדש).</p>
@@ -741,7 +890,13 @@ function renderHome() {
           <li><b>במחשב:</b> WASD או החצים לתזוזה, העכבר לכיוון, לחיצה (או רווח) ליריה.</li>
           <li><b>קרב חופשי:</b> 2.5 דקות, חוזרים לזירה אחרי פגיעה. הכי הרבה פגיעות מנצח.</li>
           <li><b>אחרון שורד:</b> אין חזרה. האזור הבטוח מתכווץ – מחוץ לו מאבדים חיים.</li>
+          <li><b>זינוק 💨:</b> כפתור הזינוק (או Shift / קליק ימני) – התחמקות מהירה, פעם ב-3 שניות.</li>
+          <li><b>ראייה:</b> רואים רק את מה שמולכם ומעגל קטן סביבכם. את מי שלא רואים – אפשר לזהות לפי העקבות 👣 והצלילים.</li>
+          <li><b>שיחים 🌳:</b> מי שבתוך שיח נעלם – עד שמתקרבים אליו או שהוא יורה.</li>
+          <li><b>נשקים:</b> 🔥 תת־מקלע (מהיר) · 💥 רובה ציד (קרוב וקטלני) · 🎯 רובה צלפים (רחוק, 70 נזק). כשהתחמושת נגמרת חוזרים לאקדח 🔫.</li>
           <li><b>בונוסים:</b> ❤️ חיים · 🛡️ מגן · 🔱 ירייה משולשת · ⚡ מהירות.</li>
+          <li><b>רצפים 👑:</b> 3 פגיעות בלי למות = כתר. מי שעוצר רצף מקבל נקודה בונוס.</li>
+          <li><b>רמה ⭐:</b> כל משחק נותן XP – על פגיעות ועל מקום ראשון.</li>
           <li>אין מספיק חברים? המארח יכול להוסיף בוטים 🤖.</li>
           <li>🔊 <a href="sounds.html">לשמוע את הצלילים ולבחור צליל יריה</a></li>
         </ul>
@@ -845,6 +1000,9 @@ document.addEventListener('click', async e => {
   }
 });
 
+// the dash button reacts on touch-down (a click would wait for the finger to lift)
+$hud.addEventListener('pointerdown', e => { if (e.target.closest('[data-act=dash]')) { e.preventDefault(); dashPress(); } });
+
 // ---------------------------------------------------------------------------------------------
 // Main loop
 let prev = performance.now(), lastCount = null, hudAt = 0;
@@ -859,6 +1017,10 @@ function frame(now) {
   for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
   for (const f of floaters) { f.y -= 30 * dt; f.life -= dt; }
   for (const f of footprints) f.life -= dt;
+  for (const a of [ghosts, flashes, holes]) { for (const x of a) x.life -= dt; for (let i = a.length - 1; i >= 0; i--) if (a[i].life <= 0) a.splice(i, 1); }
+  kick = Math.max(0, kick - dt * 40);
+  zoomKick = Math.max(0, zoomKick - dt * 0.35);
+  if (announce && (announce.life -= dt) <= 0) announce = null;
   while (footprints.length && footprints[0].life <= 0) footprints.shift();
   if (footprints.length > 200) footprints.splice(0, footprints.length - 200);
   for (let i = floaters.length - 1; i >= 0; i--) if (floaters[i].life <= 0) floaters.splice(i, 1);

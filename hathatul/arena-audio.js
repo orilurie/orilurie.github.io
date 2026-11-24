@@ -1,24 +1,28 @@
 // זירה – recorded sound effects (CC0, see sounds/CREDITS.txt) with simple positional audio:
 // sounds from far away are quieter and duller, and pan left/right by where they happen.
 
-import { settings } from './sfx.js?v=33';
+import { settings } from './sfx.js?v=34';
 
-// Which gunshot to use: picked on sounds.html (saved per device), default 1.
+// Which pistol shot to use: picked on sounds.html (saved per device), default 3.
 export function gunChoice() {
-  let n = 1;
-  try { n = Number(localStorage.getItem('arena-gun')) || 1; } catch {}
-  return n >= 1 && n <= 8 ? n : 1;
+  let n = 3;
+  try { n = Number(localStorage.getItem('arena-gun')) || 3; } catch {}
+  return n >= 1 && n <= 8 ? n : 3;
 }
 
 const FILES = {
-  shot: [`candidates/gun${gunChoice()}`],
+  shot: [`candidates/gun${gunChoice()}`], // pistol
+  shot_smg: ['candidates/gun2'],
+  shot_shotgun: ['candidates/gun5'],
+  shot_sniper: ['candidates/gun4'],
+  dash: ['dash'], empty: ['empty'],
   hit: ['hit1', 'hit2', 'hit3'],
   hurt: ['hurt1', 'hurt2'],
   wall: ['wall1', 'wall2', 'wall3'],
   step: ['step1', 'step2', 'step3', 'step4', 'step5'],
   die: ['die'], block: ['block'], kill: ['kill'], pickup: ['pickup'], count: ['count'], go: ['go'],
 };
-const BASE_VOL = { shot: 0.6, hit: 0.8, hurt: 0.9, wall: 0.25, step: 0.35, die: 0.8, block: 0.4, kill: 0.6, pickup: 0.6, count: 0.5, go: 0.6 };
+const BASE_VOL = { shot_smg: 0.4, shot_shotgun: 0.8, shot_sniper: 0.85, dash: 0.5, empty: 0.6, shot: 0.6, hit: 0.8, hurt: 0.9, wall: 0.25, step: 0.35, die: 0.8, block: 0.4, kill: 0.6, pickup: 0.6, count: 0.5, go: 0.6 };
 
 let ctx = null, master = null;
 const buffers = {};

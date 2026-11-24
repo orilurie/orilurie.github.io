@@ -5,7 +5,7 @@
 import {
   W, H, R, SPEED, BULLET_R, FIRE_CD, DMG, MAX_HP, TICK, MAX_PLAYERS, DM_TIME, RESPAWN, SPAWN_SHIELD,
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
-  canSee, STEP, NEAR,
+  canSee, STEP, NEAR, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
 } from '../../hathatul/arena-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
@@ -76,7 +76,7 @@ export class Matchmaker {
 const r1 = v => Math.round(v * 10) / 10;
 const r2 = v => Math.round(v * 100) / 100;
 const BOT_NAMES = ['רובי', 'צ׳יפ', 'ביפ', 'זיגי', 'טורבו'];
-const PICKUP_TYPES = ['heal', 'heal', 'shield', 'triple', 'speed'];
+const PICKUP_TYPES = ['heal', 'heal', 'shield', 'triple', 'speed', 'smg', 'shotgun', 'sniper', 'smg', 'shotgun'];
 
 export class Room {
   constructor(state, env) {
@@ -144,6 +144,10 @@ export class Room {
     this.last = now;
     while (this.acc >= TICK) { this.acc -= TICK; this.tick(); }
     if (now - this.lastReport > 8000) this.report();
+    if (this.phase === 'end' && this.autoNext && now >= this.autoNext) {
+      this.autoNext = 0;
+      if (this.players.size >= 2 && this.humans().some(p => p.on)) this.startRound();
+    }
     if (this.sockets.size === 0) {
       this.emptySince ||= now;
       if (now - this.emptySince > 30000) { // nobody left: shut the room down
@@ -177,6 +181,7 @@ export class Room {
         p.lastSeq = msg.s;
         const mx = Number(msg.mx) || 0, my = Number(msg.my) || 0, l = Math.hypot(mx, my);
         p.input = { mx: l > 1 ? mx / l : mx, my: l > 1 ? my / l : my, a: Number(msg.a) || 0, f: !!msg.f };
+        if (Number.isFinite(msg.d) && msg.d !== p.dashSeen) { if (p.dashSeen !== undefined) p.wantDash = true; p.dashSeen = msg.d; }
         return;
       }
       case 'cfg': {
@@ -193,6 +198,7 @@ export class Room {
       case 'lobby':
         if (id !== this.host || this.phase !== 'end') return;
         this.phase = 'lobby';
+        this.autoNext = 0;
         this.results = null;
         return this.sendMeta();
       case 'emoji':
@@ -219,6 +225,7 @@ export class Room {
     }
     for (const [w, pid] of this.sockets) if (pid === id && w !== ws) { this.sockets.delete(w); try { w.close(1000, 'replaced'); } catch {} }
     p.name = name;
+    p.lvl = Math.max(1, Math.min(99, Number(msg.lvl) || 1));
     p.spectator = !!msg.spec; // watch only (used by tests)
     if (p.spectator) p.inRound = false;
     p.on = true;
@@ -256,7 +263,8 @@ export class Room {
     const p = {
       id, name, bot, color, on: true, x: W / 2, y: H / 2, aim: 0, hp: MAX_HP, shield: 0, alive: false,
       inRound: false, kills: 0, deaths: 0, cd: 0, lastSeq: 0, input: { mx: 0, my: 0, a: 0, f: false },
-      buffs: { triple: 0, speed: 0 }, protect: 0, respawnAt: 0, place: 0,
+      buffs: { triple: 0, speed: 0 }, protect: 0, respawnAt: 0, place: 0, lvl: 1,
+      weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, shotNo: 0, lastShotT: -9, streak: 0, multi: { n: 0, t: -9 },
     };
     if (bot) p.ai = { next: 0, dir: 0, strafe: 1, seen: 0, prev: {}, path: [], goal: null, repath: 0, mem: null, heard: null, wander: null, stuckT: 0, lastPos: { x: 0, y: 0 } };
     this.players.set(id, p);
@@ -304,6 +312,7 @@ export class Room {
       Object.assign(p, { kills: 0, deaths: 0, inRound: true, place: 0, buffs: { triple: 0, speed: 0 }, input: { mx: 0, my: 0, a: p.input.a, f: false } });
       this.spawn(p);
     }
+    this.autoNext = 0;
     this.phase = 'count';
     this.countEnd = 3;
     this.endAt = 3 + DM_TIME;
@@ -323,7 +332,7 @@ export class Room {
       if (d > bestD) { bestD = d; best = { x, y }; }
     }
     best ||= { x: W / 2, y: 80 };
-    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 } });
+    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 }, weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, streak: 0, wantDash: false });
     collide(p, this.walls);
     this.emit({ k: 'spawn', id: p.id });
   }
@@ -344,6 +353,7 @@ export class Room {
     this.results = ps.map(p => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, place: p.place, bot: p.bot }))
       .sort((a, b) => a.place - b.place);
     this.bullets = [];
+    this.autoNext = Date.now() + 15000; // next round starts by itself (the host can stop it)
     this.emit({ k: 'end' });
     this.sendSnapshot();
     this.sendMeta();
@@ -385,7 +395,20 @@ export class Room {
       p.aim = inp.a;
       if (!playing) continue;
       const ox = p.x, oy = p.y;
-      move(p, inp, TICK, walls, this.t < p.buffs.speed ? 1.4 : 1);
+      p.dashCd -= TICK;
+      if (p.wantDash) {
+        p.wantDash = false;
+        if (p.dashCd <= 0) {
+          const l = Math.hypot(inp.mx, inp.my);
+          const a = l > 0.2 ? Math.atan2(inp.my, inp.mx) : inp.a;
+          p.dashDir = { mx: Math.cos(a), my: Math.sin(a) };
+          p.dashT = DASH.time;
+          p.dashCd = DASH.cd;
+          this.emit({ k: 'dash', id: p.id, x: r1(p.x), y: r1(p.y) });
+        }
+      }
+      if (p.dashT > 0) { p.dashT -= TICK; move(p, p.dashDir, TICK, walls, DASH.speed); }
+      else move(p, inp, TICK, walls, this.t < p.buffs.speed ? 1.4 : 1);
       // footsteps: others can't see you, but they notice your tracks
       p.walked = (p.walked || 0) + Math.hypot(p.x - ox, p.y - oy);
       if (p.walked >= STEP) {
@@ -399,9 +422,12 @@ export class Room {
       }
       p.cd -= TICK;
       if (inp.f && p.cd <= 0) {
-        p.cd = FIRE_CD;
-        for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id });
-        this.emit({ k: 'shot', id: p.id, x: r1(p.x), y: r1(p.y) });
+        const w = WEAPONS[p.weapon];
+        p.cd = w.cd;
+        p.lastShotT = this.t;
+        for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple, p.weapon, p.shotNo++)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id });
+        this.emit({ k: 'shot', id: p.id, x: r1(p.x), y: r1(p.y), w: WEAPON_LIST.indexOf(p.weapon) });
+        if (Number.isFinite(p.ammo) && --p.ammo <= 0) { p.weapon = 'pistol'; p.ammo = Infinity; this.emit({ k: 'empty', id: p.id }); }
         for (const o of this.players.values()) {
           if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 750) o.ai.heard = { x: p.x, y: p.y, t: this.t };
         }
@@ -413,6 +439,7 @@ export class Room {
         if (u.type === 'heal' && p.hp >= MAX_HP) continue;
         if (u.type === 'heal') p.hp = Math.min(MAX_HP, p.hp + 40);
         else if (u.type === 'shield') p.shield = 50;
+        else if (WEAPONS[u.type]) { p.weapon = u.type; p.ammo = WEAPONS[u.type].ammo; }
         else p.buffs[u.type] = this.t + BUFF_TIME[u.type];
         this.pickups.splice(i, 1);
         this.emit({ k: 'pick', id: p.id, type: u.type, x: r1(u.x), y: r1(u.y) });
@@ -435,9 +462,15 @@ export class Room {
             if (segDist(b.px, b.py, b.x, b.y, p.x, p.y) > R + BULLET_R) continue;
             alive = false;
             if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); break; }
-            this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y) });
-            if (p.bot) p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
-            this.damage(p, DMG, b.owner);
+            this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y), dmg: b.dmg || DMG });
+            if (p.bot) {
+              p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
+              if (p.dashCd <= 0 && Math.random() < 0.3) p.wantDash = true;
+            }
+            const sp = Math.hypot(b.vx, b.vy) || 1, push = WEAPONS[b.w]?.push || 8;
+            p.x += (b.vx / sp) * push; p.y += (b.vy / sp) * push;
+            collide(p, walls);
+            this.damage(p, b.dmg || DMG, b.owner);
             break;
           }
         }
@@ -471,7 +504,16 @@ export class Room {
     p.deaths++;
     p.respawnAt = this.t + RESPAWN;
     const killer = by && by !== p.id ? this.players.get(by) : null;
-    if (killer) killer.kills++;
+    const ended = p.streak;
+    p.streak = 0;
+    if (killer) {
+      killer.kills++;
+      killer.streak++;
+      killer.multi = this.t - killer.multi.t < 3.5 ? { n: killer.multi.n + 1, t: this.t } : { n: 1, t: this.t };
+      if (killer.multi.n >= 2) this.emit({ k: 'multi', id: killer.id, n: killer.multi.n });
+      if (killer.streak >= 3 && killer.streak % 2 === 1) this.emit({ k: 'streak', id: killer.id, n: killer.streak });
+      if (ended >= 3) { killer.kills++; this.emit({ k: 'stop', a: killer.id, v: p.id, n: ended }); } // bounty: +1
+    }
     if (this.mode === 'lms') this.deadOrder.push(p.id);
     this.emit({ k: 'kill', a: killer?.id || null, v: p.id, x: r1(p.x), y: r1(p.y) });
     this.sendMeta();
@@ -489,6 +531,14 @@ export class Room {
     }
   }
 
+  // Can viewer v see player o? Vision cone + walls, and a bush hides you unless someone is very
+  // close or you just fired.
+  visible(v, o) {
+    if (!canSee(v.x, v.y, v.aim, o.x, o.y, this.walls)) return false;
+    if (inBush(o.x, o.y, this.map) && Math.hypot(o.x - v.x, o.y - v.y) > BUSH_REVEAL && this.t - o.lastShotT > 1.2) return false;
+    return true;
+  }
+
   // ---------- bots ----------
   // Bots play by the same rules: they only know about you if they see you (same vision cone),
   // remember where they last saw you, and go check on footsteps, shots and hits they hear.
@@ -496,7 +546,7 @@ export class Room {
     const ai = p.ai, walls = this.walls;
     let target = null, td = Infinity;
     for (const o of this.players.values()) {
-      if (!o.alive || o === p || !canSee(p.x, p.y, p.aim, o.x, o.y, walls)) continue;
+      if (!o.alive || o === p || !this.visible(p, o)) continue;
       const d = Math.hypot(o.x - p.x, o.y - p.y);
       if (d < td) { td = d; target = o; }
     }
@@ -506,7 +556,7 @@ export class Room {
     // where to go
     const zoneOut = this.mode === 'lms' && this.zone && Math.hypot(p.x - this.zone.x, p.y - this.zone.y) > this.zone.r * 0.75;
     const pick = this.pickups.filter(u => !(u.type === 'heal' && p.hp >= MAX_HP))
-      .map(u => ({ u, d: Math.hypot(u.x - p.x, u.y - p.y) })).sort((a, b) => a.d - b.d)[0];
+      .map(u => ({ u, d: Math.hypot(u.x - p.x, u.y - p.y) * (WEAPONS[u.type] && p.weapon === 'pistol' ? 0.6 : 1) })).sort((a, b) => a.d - b.d)[0];
     let goal = null, look = null, fight = false;
     if (zoneOut) goal = { x: this.zone.x, y: this.zone.y };
     else if (target) { fight = true; }
@@ -530,7 +580,8 @@ export class Room {
     if (fight) {
       if (this.t >= ai.next) { ai.next = this.t + 0.25 + Math.random() * 0.2; if (Math.random() < 0.15) ai.strafe *= -1; }
       const toT = Math.atan2(target.y - p.y, target.x - p.x);
-      let a = dist > 380 ? toT : dist < 180 ? toT + Math.PI + ai.strafe * 0.6 : toT + ai.strafe * Math.PI / 2;
+      const far = { shotgun: 200, sniper: 520, smg: 330 }[p.weapon] || 380, close = p.weapon === 'shotgun' ? 90 : p.weapon === 'sniper' ? 300 : 180;
+      let a = dist > far ? toT : dist < close ? toT + Math.PI + ai.strafe * 0.6 : toT + ai.strafe * Math.PI / 2;
       for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
         const q = { x: p.x, y: p.y };
         move(q, { mx: Math.cos(a + off), my: Math.sin(a + off) }, 0.25, walls);
@@ -586,7 +637,8 @@ export class Room {
     let da = want - p.input.a;
     da = Math.atan2(Math.sin(da), Math.cos(da));
     p.input.a += da * turn;
-    p.input.f = fight && dist < 620 && ai.seen > 0.6 && Math.abs(da) < 0.12 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
+    const range = { shotgun: 280, sniper: 900, smg: 480 }[p.weapon] || 620;
+    p.input.f = fight && dist < range && ai.seen > 0.6 && Math.abs(da) < 0.12 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
     if (p.input.f && p.cd <= 0) ai.shotNo = (ai.shotNo || 0) + 1; // fires this tick: next shot gets a new error
   }
 
@@ -658,9 +710,10 @@ export class Room {
     const all = [];
     for (const p of this.players.values()) {
       if (!p.inRound) continue;
-      const flags = (this.t < p.buffs.triple ? 1 : 0) | (this.t < p.buffs.speed ? 2 : 0) | (this.t < p.protect ? 4 : 0);
+      const flags = (this.t < p.buffs.triple ? 1 : 0) | (this.t < p.buffs.speed ? 2 : 0) | (this.t < p.protect ? 4 : 0)
+        | (p.dashT > 0 ? 8 : 0) | (p.streak >= 3 ? 16 : 0) | (inBush(p.x, p.y, this.map) ? 32 : 0);
       all.push({ p, row: [p.id, r1(p.x), r1(p.y), r2(p.aim), Math.ceil(p.hp), p.alive ? 1 : 0, Math.ceil(p.shield), flags,
-        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t))] });
+        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t)), WEAPON_LIST.indexOf(p.weapon)] });
       if (!p.bot) ack[p.id] = p.lastSeq;
     }
     const base = {
@@ -678,18 +731,19 @@ export class Room {
       const visible = new Set();
       const rows = [];
       for (const { p, row } of all) {
-        if (p === v || !p.alive || sees(p.x, p.y)) { rows.push(row); if (p.alive) visible.add(p.id); }
+        if (p === v || !p.alive || seesAll || this.visible(v, p)) { rows.push(row); if (p.alive) visible.add(p.id); }
         else rows.push([p.id, 0, 0, 0, 0, 2, 0, 0, 0]); // alive but hidden (alive = 2, keeps counts right)
       }
       const near = (x, y, d) => seesAll || Math.hypot(x - v.x, y - v.y) < d;
       const ev = this.events.filter(e => {
-        if (e.k === 'kill' || e.k === 'start' || e.k === 'go' || e.k === 'end' || e.k === 'spawn') return true;
+        if (['kill', 'start', 'go', 'end', 'spawn', 'multi', 'streak', 'stop'].includes(e.k)) return true;
         if (e.v === v?.id || e.by === v?.id || e.id === v?.id) return true;
         if (e.k === 'shot') return near(e.x, e.y, 900);
         return e.x === undefined || sees(e.x, e.y);
       }).map(e => (e.k === 'kill' && e.x !== undefined && !sees(e.x, e.y) && e.a !== v?.id && e.v !== v?.id ? { k: e.k, a: e.a, v: e.v } : e));
       const msg = {
         ...base, p: rows, ev,
+        me: v && v.inRound ? { w: WEAPON_LIST.indexOf(v.weapon), am: Number.isFinite(v.ammo) ? v.ammo : -1, dc: r1(Math.max(0, v.dashCd)), st: v.streak } : null,
         b: this.bullets.filter(b => b.owner === v?.id || sees(b.x, b.y)).map(b => [b.id, r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.owner]),
         fs: seesAll ? [] : this.steps.filter(st => st[4] !== v.id && !visible.has(st[4]) && near(st[0], st[1], 1100)).map(st => st.slice(0, 4)),
       };
@@ -702,7 +756,8 @@ export class Room {
     this.broadcast({
       t: 'room', code: this.code, pub: this.pub, host: this.host, phase: this.phase, mode: this.mode,
       mapPick: this.mapPick, map: this.map, bots: this.botCount,
-      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.bot, on: p.on, k: p.kills, d: p.deaths, inRound: p.inRound })),
+      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.bot, on: p.on, k: p.kills, d: p.deaths, inRound: p.inRound, lvl: p.bot ? 0 : p.lvl })),
+      next: this.phase === 'end' && this.autoNext ? Math.max(0, Math.round((this.autoNext - Date.now()) / 1000)) : null,
       results: this.results,
     });
   }

@@ -21,7 +21,22 @@ export const PICKUPS = {
   shield: { icon: '🛡️', name: 'מגן' },
   triple: { icon: '🔱', name: 'ירייה משולשת' },
   speed: { icon: '⚡', name: 'מהירות' },
+  smg: { icon: '🔥', name: 'תת־מקלע', weapon: true },
+  shotgun: { icon: '💥', name: 'רובה ציד', weapon: true },
+  sniper: { icon: '🎯', name: 'רובה צלפים', weapon: true },
 };
+
+// Weapons: you always have the pistol; a weapon pickup replaces it until its ammo runs out.
+// spread: fixed fan for shotgun pellets; jitter: a small repeating pattern for the SMG.
+export const WEAPONS = {
+  pistol: { name: 'אקדח', icon: '🔫', cd: 0.45, dmg: 25, speed: 780, life: 0.85, pellets: 1, spread: 0, jitter: 0, ammo: Infinity, kick: 3, push: 8 },
+  smg: { name: 'תת־מקלע', icon: '🔥', cd: 0.12, dmg: 11, speed: 820, life: 0.6, pellets: 1, spread: 0, jitter: 0.08, ammo: 45, kick: 1.5, push: 4 },
+  shotgun: { name: 'רובה ציד', icon: '💥', cd: 0.85, dmg: 13, speed: 700, life: 0.34, pellets: 6, spread: 0.45, jitter: 0, ammo: 8, kick: 7, push: 14 },
+  sniper: { name: 'רובה צלפים', icon: '🎯', cd: 1.25, dmg: 70, speed: 1500, life: 0.75, pellets: 1, spread: 0, jitter: 0, ammo: 5, kick: 8, push: 30 },
+};
+export const WEAPON_LIST = Object.keys(WEAPONS); // index sent over the wire
+export const DASH = { time: 0.16, speed: 3.4, cd: 3 }; // a quick dodge
+export const BUSH_REVEAL = 90; // in a bush you're hidden unless someone is this close (or you just fired)
 export const BUFF_TIME = { triple: 8, speed: 6 };
 
 const pillars = () => {
@@ -41,14 +56,19 @@ export const MAPS = [
       [300, 760, 200, 40], [300, 640, 40, 160], [1100, 760, 200, 40], [1260, 640, 40, 160],
       [780, 110, 40, 180], [780, 710, 40, 180], [120, 480, 160, 40], [1320, 480, 160, 40],
     ],
+    bushes: [[560, 500, 56], [1040, 500, 56], [180, 150, 52], [1420, 850, 52], [180, 850, 52], [1420, 150, 52]],
   },
-  { name: 'עמודים', walls: pillars() },
+  {
+    name: 'עמודים', walls: pillars(),
+    bushes: [[550, 250, 52], [1050, 750, 52], [300, 500, 50], [1300, 500, 50], [550, 750, 46], [1050, 250, 46]],
+  },
   {
     name: 'מסדרונות',
     walls: [
       [200, 320, 480, 36], [920, 320, 480, 36], [200, 644, 480, 36], [920, 644, 480, 36],
       [782, 120, 36, 230], [782, 650, 36, 230], [500, 470, 36, 60], [1064, 470, 36, 60],
     ],
+    bushes: [[300, 180, 52], [1300, 820, 52], [300, 820, 52], [1300, 180, 52], [800, 500, 58]],
   },
 ];
 
@@ -107,12 +127,21 @@ export function segDist(ax, ay, bx, by, px, py) {
   return Math.hypot(ax + dx * t - px, ay + dy * t - py);
 }
 
-// The bullets of one shot: one, or a fan of three with the triple-shot buff.
-export function shotBullets(x, y, aim, triple) {
-  const angles = triple ? [aim - 0.16, aim, aim + 0.16] : [aim];
+export const inBush = (x, y, map) => (MAPS[map].bushes || []).some(([bx, by, br]) => Math.hypot(x - bx, y - by) < br);
+
+const JITTER = [0, 0.6, -0.6, 0.3, -0.9, 0.9, -0.3];
+// The bullets of one shot. triple (buff) fans single-bullet weapons into three.
+export function shotBullets(x, y, aim, triple, weapon = 'pistol', shotNo = 0) {
+  const w = WEAPONS[weapon] || WEAPONS.pistol;
+  let angles;
+  if (w.pellets > 1) angles = Array.from({ length: w.pellets }, (_, i) => aim - w.spread / 2 + (w.spread * i) / (w.pellets - 1));
+  else {
+    const a = aim + JITTER[shotNo % JITTER.length] * w.jitter;
+    angles = triple ? [a - 0.16, a, a + 0.16] : [a];
+  }
   return angles.map(a => ({
     x: x + Math.cos(a) * (R + 6), y: y + Math.sin(a) * (R + 6),
-    vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: BULLET_LIFE,
+    vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed, life: w.life, dmg: w.dmg, w: weapon,
   }));
 }
 
