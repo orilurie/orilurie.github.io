@@ -1,29 +1,9 @@
 <!doctype html>
-<html lang="he" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>חתחתול אונליין</title>
-<meta name="description" content="משחק הקלפים חתחתול – שחקו אונליין עם חברים">
-<link rel="icon" type="image/png" href="icons/favicon-64.png">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="theme-color" content="#ff8a3d">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="חתחתול">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=36">
-<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
-</head>
-<body>
-<main id="app"></main>
-<div id="fx" aria-hidden="true"></div>
-<div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="app.js?v=36"></script>
-</body>
-</html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ערב משחקים</title>
+<!-- The games moved to /game-night/. Keep the room code and other parameters. -->
+<script>location.replace('../game-night/' + location.search + location.hash);</script>
+<meta http-equiv="refresh" content="0; url=../game-night/">
+</head><body style="font-family:system-ui;text-align:center;padding:40px">
+<p>המשחקים עברו לכתובת חדשה: <a href="../game-night/">ערב משחקים</a></p>
+</body></html>

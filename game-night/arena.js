@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=36';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=36';
-import { sound } from './arena-audio.js?v=36';
+} from './arena-core.js?v=37';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=37';
+import { sound } from './arena-audio.js?v=37';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 36;
+export const VERSION = 37;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');

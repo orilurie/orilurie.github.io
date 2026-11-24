@@ -1,4 +1,4 @@
-# Game server for "זירה" (the real-time arena shooter in hathatul/arena.html).
+# Game server for "זירה" (the real-time arena shooter in game-night/arena.html).
 # Deploy: CLOUDFLARE_API_TOKEN=... npx wrangler deploy   (from this folder)
 name = "arena"
 main = "src/index.js"

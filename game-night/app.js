@@ -1,13 +1,13 @@
-import * as Hathatul from './game.js?v=36';
-import * as Quartets from './quartets.js?v=36';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=36';
-import * as Battleship from './battleship.js?v=36';
-import * as Imposter from './imposter.js?v=36';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=36';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=36';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=36';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=36';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=36';
+import * as Hathatul from './game.js?v=37';
+import * as Quartets from './quartets.js?v=37';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=37';
+import * as Battleship from './battleship.js?v=37';
+import * as Imposter from './imposter.js?v=37';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=37';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=37';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=37';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=37';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=37';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -18,7 +18,7 @@ const GAMES = {
   imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 36; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 37; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -469,6 +469,7 @@ const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגוב
 function renderHome() {
   $app.innerHTML = `
     <div class="panel home">
+      <div class="brand">🎲 ערב משחקים</div>
       <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥', imposter: '🕵️🤫' }[ui.gameType] || '🐱🐭'}</span></h1>
       <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
         ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
@@ -498,7 +499,7 @@ function renderHome() {
 
 function installHtml() {
   if (standalone) return '';
-  if (installPrompt) return `<button class="install-btn" data-act="install">📲 התקינו את חתחתול כאפליקציה</button>`;
+  if (installPrompt) return `<button class="install-btn" data-act="install">📲 התקינו את ערב משחקים כאפליקציה</button>`;
   if (isIOSDevice) {
     return `<details class="install-ios"><summary>📲 התקנה כאפליקציה במסך הבית</summary>
       <ol>
