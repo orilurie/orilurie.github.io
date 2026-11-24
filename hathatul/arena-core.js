@@ -7,8 +7,8 @@ export const SPEED = 240; // units / second
 export const BULLET_SPEED = 780;
 export const BULLET_R = 5;
 export const BULLET_LIFE = 0.85; // seconds
-export const FIRE_CD = 0.24; // seconds between shots
-export const DMG = 20;
+export const FIRE_CD = 0.45; // seconds between shots
+export const DMG = 25;
 export const MAX_HP = 100;
 export const TICK = 1 / 30;
 export const MAX_PLAYERS = 6;
@@ -124,4 +124,43 @@ export function stepBullet(b, dt, walls) {
   if (b.life <= 0 || b.x < 0 || b.y < 0 || b.x > W || b.y > H) return false;
   const mx = (b.px + b.x) / 2, my = (b.py + b.y) / 2;
   return !insideWall(b.x, b.y, walls) && !insideWall(mx, my, walls);
+}
+
+// ---------- vision ----------
+// You see a cone in front of you (where you aim) and a small circle around you; walls block it.
+export const FOV = 1.9; // radians (~110°)
+export const VIEW_RANGE = 720;
+export const NEAR = 115;
+export const STEP = 42; // a footstep every this many units walked
+
+export function canSee(vx, vy, aim, tx, ty, walls) {
+  const dx = tx - vx, dy = ty - vy, d = Math.hypot(dx, dy);
+  if (d > VIEW_RANGE + R) return false;
+  if (d > NEAR + R) {
+    let da = Math.atan2(dy, dx) - aim;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    if (Math.abs(da) > FOV / 2 + Math.atan2(R, d)) return false;
+  }
+  return !blocked(vx, vy, tx, ty, walls);
+}
+
+// Distance along a ray until it hits a wall or the world's edge.
+export function rayDist(x, y, a, walls, max) {
+  const dx = Math.cos(a), dy = Math.sin(a);
+  let best = max;
+  const slab = (rx, ry, rw, rh) => {
+    let t0 = 0, t1 = best;
+    for (const [o, d, lo, hi] of [[x, dx, rx, rx + rw], [y, dy, ry, ry + rh]]) {
+      if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) return; continue; }
+      let ta = (lo - o) / d, tb = (hi - o) / d;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) return;
+    }
+    if (t0 > 0 && t0 < best) best = t0;
+  };
+  for (const [rx, ry, rw, rh] of walls) slab(rx, ry, rw, rh);
+  if (dx > 0) best = Math.min(best, (W - x) / dx); else if (dx < 0) best = Math.min(best, -x / dx);
+  if (dy > 0) best = Math.min(best, (H - y) / dy); else if (dy < 0) best = Math.min(best, -y / dy);
+  return Math.max(0, best);
 }

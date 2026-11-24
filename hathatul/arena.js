@@ -3,12 +3,12 @@
 // shots so controls feel instant, and interpolates everyone else ~110 ms in the past.
 
 import {
-  W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R,
-  move, shotBullets, stepBullet, blocked,
-} from './arena-core.js?v=30';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=30';
+  W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
+  move, shotBullets, stepBullet, blocked, rayDist,
+} from './arena-core.js?v=31';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=31';
 
-export const VERSION = 30;
+export const VERSION = 31;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -135,6 +135,7 @@ function onMsg(m) {
     snaps.push({ at, s: m });
     while (snaps.length > 30) snaps.shift();
     lastSnap = m;
+    for (const [x, y, a, side] of m.fs || []) footprints.push({ x, y, a, side, life: 2 });
     handleEvents(m.ev || []);
     reconcile(m);
     if (meta && m.ph !== meta.phase && !(meta.phase === 'end')) { meta.phase = m.ph; }
@@ -206,6 +207,10 @@ function readInput(me) {
     const sp = toScreen(me.x, me.y);
     input.a = Math.atan2(mouse.y - sp.y, mouse.x - sp.x);
     input.f = !!mouse.down;
+  } else if (mx || my) { // no aiming: you look where you walk
+    let da = Math.atan2(my, mx) - input.a;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    input.a += da * 0.25;
   }
   if (keys.has('Space')) input.f = true;
   input.a = Math.round(input.a * 100) / 100;
@@ -234,6 +239,7 @@ const walls = () => MAPS[meta?.map ?? 0].walls;
 const myServer = () => lastSnap?.p.find(p => p[0] === myId);
 
 function resetRound() {
+  footprints.length = 0;
   me = null; pending.length = 0; myBullets = []; particles.length = 0; floaters.length = 0; feed.length = 0;
   snaps.length = 0; lastSnap = null; seenEv = new Set();
 }
@@ -308,18 +314,20 @@ function interpolate(now) {
   const span = b.at - a.at;
   const k = span > 0 ? Math.max(0, Math.min(1, (t - a.at) / span)) : 1;
   for (const pb of b.s.p) {
+    if (pb[5] === 2) continue; // alive but out of your sight
     const pa = a.s.p.find(p => p[0] === pb[0]) || pb;
     const jump = Math.hypot(pb[1] - pa[1], pb[2] - pa[2]) > 120 || pa[5] !== pb[5]; // respawned
     const lerp = (x, y) => (jump ? y : x + (y - x) * k);
     let da = pb[3] - pa[3];
     da = Math.atan2(Math.sin(da), Math.cos(da));
-    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: pb[4], alive: !!pb[5], shield: pb[6], flags: pb[7], respawn: pb[8] });
+    others.push({ id: pb[0], x: lerp(pa[1], pb[1]), y: lerp(pa[2], pb[2]), aim: jump ? pb[3] : pa[3] + da * k, hp: pb[4], alive: pb[5] === 1, shield: pb[6], flags: pb[7], respawn: pb[8] });
   }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Effects
 const particles = [];
+const footprints = []; // tracks of players you can't see
 const floaters = [];
 const feed = []; // kill feed
 let shake = 0, hurtFlash = 0;
@@ -344,14 +352,13 @@ function handleEvents(evs) {
       case 'hit':
         if (ev.by !== myId) spark(ev.x, ev.y, colorOf(ev.v), 7);
         else play('hitmark');
-        floaters.push({ x: ev.x, y: ev.y - 10, text: '-20', color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
+        floaters.push({ x: ev.x, y: ev.y - 10, text: `-${DMG}`, color: ev.v === myId ? '#ff6b6b' : '#fff', life: 0.8 });
         if (ev.v === myId) { play('hurt'); haptic('hurt'); shake = Math.min(14, shake + 7); hurtFlash = 0.35; }
         break;
       case 'block': spark(ev.x, ev.y, '#9fe8ff', 5); break;
       case 'wall': break;
       case 'kill': {
-        spark(ev.x, ev.y, colorOf(ev.v), 26, 260);
-        spark(ev.x, ev.y, '#ffd27a', 12, 200);
+        if (ev.x !== undefined) { spark(ev.x, ev.y, colorOf(ev.v), 26, 260); spark(ev.x, ev.y, '#ffd27a', 12, 200); }
         feed.push({ a: ev.a, v: ev.v, life: 5 });
         if (feed.length > 4) feed.shift();
         if (ev.v === myId) { play('die'); haptic('die'); shake = 18; }
@@ -464,6 +471,31 @@ function drawWorld(now, dt) {
   }
   g.globalAlpha = 1;
 
+  // fog: outside your view cone (and the small circle around you) you see the arena, not players
+  const looking = me && !me.dead && meta?.phase === 'play';
+  if (looking) {
+    const poly = visionPolygon(me.x, me.y, input.a);
+    g.fillStyle = 'rgba(6,9,18,0.62)';
+    g.beginPath();
+    g.rect(-400, -400, W + 800, H + 800);
+    g.moveTo(poly[0], poly[1]);
+    for (let i = 2; i < poly.length; i += 2) g.lineTo(poly[i], poly[i + 1]);
+    g.closePath();
+    g.fill('evenodd');
+  }
+  // footprints: you can't see them, but you notice their tracks
+  for (const f of footprints) {
+    g.save();
+    g.translate(f.x - Math.sin(f.a) * 6 * f.side, f.y + Math.cos(f.a) * 6 * f.side);
+    g.rotate(f.a);
+    g.globalAlpha = Math.min(0.75, f.life * 0.6);
+    g.fillStyle = '#e8ecf5';
+    g.beginPath(); g.ellipse(2, 0, 6, 3.6, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(-7, 0, 3, 2.6, 0, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  g.globalAlpha = 1;
+
   // shrinking zone
   if (s?.z) {
     const [zx, zy, zr] = s.z;
@@ -523,6 +555,22 @@ function drawWorld(now, dt) {
     grd.addColorStop(1, `rgba(255,0,0,${hurtFlash})`);
     g.fillStyle = grd; g.fillRect(0, 0, cw, ch);
   }
+}
+
+// The area you can see: the view cone out to VIEW_RANGE plus a NEAR circle, cut by walls.
+function visionPolygon(x, y, aim) {
+  const pts = [];
+  const n = 240;
+  const inCone = a => { let d = a - aim; d = Math.atan2(Math.sin(d), Math.cos(d)); return Math.abs(d) <= FOV / 2; };
+  const angles = [];
+  for (let i = 0; i < n; i++) angles.push(aim - Math.PI + (i / n) * Math.PI * 2);
+  angles.push(aim - FOV / 2 - 1e-4, aim - FOV / 2 + 1e-4, aim + FOV / 2 - 1e-4, aim + FOV / 2 + 1e-4);
+  angles.sort((a, b) => a - b);
+  for (const a of angles) {
+    const d = rayDist(x, y, a, walls(), inCone(a) ? VIEW_RANGE : NEAR);
+    pts.push(x + Math.cos(a) * d, y + Math.sin(a) * d);
+  }
+  return pts;
 }
 
 function drawBullet(x, y, vx, vy, color) {
@@ -796,6 +844,9 @@ function frame(now) {
   for (const pt of particles) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vx *= 0.92; pt.vy *= 0.92; pt.life -= dt; }
   for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
   for (const f of floaters) { f.y -= 30 * dt; f.life -= dt; }
+  for (const f of footprints) f.life -= dt;
+  while (footprints.length && footprints[0].life <= 0) footprints.shift();
+  if (footprints.length > 200) footprints.splice(0, footprints.length - 200);
   for (let i = floaters.length - 1; i >= 0; i--) if (floaters[i].life <= 0) floaters.splice(i, 1);
   for (const f of feed) f.life -= dt;
   while (feed.length && feed[0].life <= 0) feed.shift();

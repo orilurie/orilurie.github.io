@@ -5,6 +5,7 @@
 import {
   W, H, R, SPEED, BULLET_R, FIRE_CD, DMG, MAX_HP, TICK, MAX_PLAYERS, DM_TIME, RESPAWN, SPAWN_SHIELD,
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
+  canSee, STEP, NEAR,
 } from '../../hathatul/arena-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
@@ -93,6 +94,7 @@ export class Room {
     this.bullets = [];
     this.pickups = [];
     this.events = [];
+    this.steps = [];
     this.timer = null;
     this.t = 0; // game clock (seconds)
     this.tickNo = 0;
@@ -217,6 +219,8 @@ export class Room {
     }
     for (const [w, pid] of this.sockets) if (pid === id && w !== ws) { this.sockets.delete(w); try { w.close(1000, 'replaced'); } catch {} }
     p.name = name;
+    p.spectator = !!msg.spec; // watch only (used by tests)
+    if (p.spectator) p.inRound = false;
     p.on = true;
     p.offSince = 0;
     this.sockets.set(ws, id);
@@ -254,7 +258,7 @@ export class Room {
       inRound: false, kills: 0, deaths: 0, cd: 0, lastSeq: 0, input: { mx: 0, my: 0, a: 0, f: false },
       buffs: { triple: 0, speed: 0 }, protect: 0, respawnAt: 0, place: 0,
     };
-    if (bot) p.ai = { next: 0, dir: 0, strafe: 1, seen: 0, tx: W / 2, ty: H / 2, prev: {} };
+    if (bot) p.ai = { next: 0, dir: 0, strafe: 1, seen: 0, prev: {}, path: [], goal: null, repath: 0, mem: null, heard: null, wander: null, stuckT: 0, lastPos: { x: 0, y: 0 } };
     this.players.set(id, p);
     return p;
   }
@@ -283,6 +287,7 @@ export class Room {
     this.map = this.mapPick >= 0 ? this.mapPick : Math.floor(Math.random() * MAPS.length);
     this.bullets = [];
     this.pickups = [];
+    this.steps = [];
     this.results = null;
     this.t = 0;
     this.nextPickup = 4;
@@ -295,6 +300,7 @@ export class Room {
     }
     this.zone = { x: zx, y: zy, r: Math.hypot(W, H) / 2 + 40 };
     for (const p of this.players.values()) {
+      if (p.spectator) continue;
       Object.assign(p, { kills: 0, deaths: 0, inRound: true, place: 0, buffs: { triple: 0, speed: 0 }, input: { mx: 0, my: 0, a: p.input.a, f: false } });
       this.spawn(p);
     }
@@ -378,12 +384,27 @@ export class Room {
       const inp = p.on || p.bot ? p.input : { mx: 0, my: 0, a: p.aim, f: false };
       p.aim = inp.a;
       if (!playing) continue;
+      const ox = p.x, oy = p.y;
       move(p, inp, TICK, walls, this.t < p.buffs.speed ? 1.4 : 1);
+      // footsteps: others can't see you, but they notice your tracks
+      p.walked = (p.walked || 0) + Math.hypot(p.x - ox, p.y - oy);
+      if (p.walked >= STEP) {
+        p.walked = 0;
+        p.side = -(p.side || 1);
+        const step = [r1(p.x), r1(p.y), r2(Math.atan2(p.y - oy, p.x - ox)), p.side, p.id];
+        this.steps.push(step);
+        for (const o of this.players.values()) {
+          if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 480) o.ai.heard = { x: p.x, y: p.y, t: this.t };
+        }
+      }
       p.cd -= TICK;
       if (inp.f && p.cd <= 0) {
         p.cd = FIRE_CD;
         for (const b of shotBullets(p.x, p.y, p.aim, this.t < p.buffs.triple)) this.bullets.push({ ...b, id: ++this.seq, owner: p.id });
-        this.emit({ k: 'shot', id: p.id });
+        this.emit({ k: 'shot', id: p.id, x: r1(p.x), y: r1(p.y) });
+        for (const o of this.players.values()) {
+          if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 750) o.ai.heard = { x: p.x, y: p.y, t: this.t };
+        }
       }
       // pickups
       for (let i = this.pickups.length - 1; i >= 0; i--) {
@@ -415,10 +436,11 @@ export class Room {
             alive = false;
             if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); break; }
             this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y) });
+            if (p.bot) p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
             this.damage(p, DMG, b.owner);
             break;
           }
-        } else this.emit({ k: 'wall', x: r1(b.x - b.vx * TICK * 0.3), y: r1(b.y - b.vy * TICK * 0.3) });
+        }
         if (alive) live.push(b);
       }
       this.bullets = live;
@@ -468,82 +490,204 @@ export class Room {
   }
 
   // ---------- bots ----------
+  // Bots play by the same rules: they only know about you if they see you (same vision cone),
+  // remember where they last saw you, and go check on footsteps, shots and hits they hear.
   botThink(p) {
     const ai = p.ai, walls = this.walls;
-    const enemies = [...this.players.values()].filter(o => o.alive && o !== p);
     let target = null, td = Infinity;
-    for (const o of enemies) {
-      const d = Math.hypot(o.x - p.x, o.y - p.y) + (blocked(p.x, p.y, o.x, o.y, walls) ? 250 : 0);
+    for (const o of this.players.values()) {
+      if (!o.alive || o === p || !canSee(p.x, p.y, p.aim, o.x, o.y, walls)) continue;
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
       if (d < td) { td = d; target = o; }
     }
-    const los = target && !blocked(p.x, p.y, target.x, target.y, walls);
-    const dist = target ? Math.hypot(target.x - p.x, target.y - p.y) : Infinity;
+    if (target) { ai.mem = { x: target.x, y: target.y, t: this.t }; ai.seen += TICK; } else ai.seen = 0;
+    const dist = td;
 
-    if (this.t >= ai.next) {
-      ai.next = this.t + 0.2 + Math.random() * 0.15;
-      if (Math.random() < 0.12) ai.strafe *= -1;
-      let goal = null; // [x, y, away?]
-      const zoneOut = this.mode === 'lms' && Math.hypot(p.x - this.zone.x, p.y - this.zone.y) > this.zone.r * 0.8;
-      const near = this.pickups.filter(u => !(u.type === 'heal' && p.hp >= MAX_HP)).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
-      let angle;
-      if (zoneOut) angle = Math.atan2(this.zone.y - p.y, this.zone.x - p.x);
-      else if (near && Math.hypot(near.x - p.x, near.y - p.y) < 260 && (!los || dist > 300 || p.hp < 50)) angle = Math.atan2(near.y - p.y, near.x - p.x);
-      else if (target && (!los || dist > 330)) angle = Math.atan2(target.y - p.y, target.x - p.x);
-      else if (target && dist < 170) angle = Math.atan2(p.y - target.y, p.x - target.x) + ai.strafe * 0.6;
-      else if (target) angle = Math.atan2(target.y - p.y, target.x - p.x) + ai.strafe * Math.PI / 2;
-      else {
-        if (Math.hypot(ai.tx - p.x, ai.ty - p.y) < 60) { ai.tx = 100 + Math.random() * (W - 200); ai.ty = 100 + Math.random() * (H - 200); }
-        angle = Math.atan2(ai.ty - p.y, ai.tx - p.x);
+    // where to go
+    const zoneOut = this.mode === 'lms' && this.zone && Math.hypot(p.x - this.zone.x, p.y - this.zone.y) > this.zone.r * 0.75;
+    const pick = this.pickups.filter(u => !(u.type === 'heal' && p.hp >= MAX_HP))
+      .map(u => ({ u, d: Math.hypot(u.x - p.x, u.y - p.y) })).sort((a, b) => a.d - b.d)[0];
+    let goal = null, look = null, fight = false;
+    if (zoneOut) goal = { x: this.zone.x, y: this.zone.y };
+    else if (target) { fight = true; }
+    else if (pick && pick.d < 320) goal = pick.u;
+    else if (ai.heard && this.t - ai.heard.t < 4) { goal = ai.heard; look = ai.heard; if (Math.hypot(ai.heard.x - p.x, ai.heard.y - p.y) < 50) ai.heard = null; }
+    else if (ai.mem && this.t - ai.mem.t < 5) { goal = ai.mem; look = ai.mem; if (Math.hypot(ai.mem.x - p.x, ai.mem.y - p.y) < 50) ai.mem = null; }
+    else {
+      if (!ai.wander || Math.hypot(ai.wander.x - p.x, ai.wander.y - p.y) < 60 || this.t - ai.wander.t > 12) {
+        for (let i = 0; i < 20; i++) {
+          const x = 80 + Math.random() * (W - 160), y = 80 + Math.random() * (H - 160);
+          if (insideWall(x, y, walls, R + 10)) continue;
+          if (this.mode === 'lms' && this.zone && Math.hypot(x - this.zone.x, y - this.zone.y) > this.zone.r * 0.7) continue;
+          ai.wander = { x, y, t: this.t }; break;
+        }
       }
-      // steer around walls: take the first direction that actually moves us
-      for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.3, -2.3, Math.PI]) {
-        const a = angle + off, q = { x: p.x, y: p.y };
-        move(q, { mx: Math.cos(a), my: Math.sin(a) }, 0.3, walls);
-        if (Math.hypot(q.x - p.x, q.y - p.y) > SPEED * 0.3 * 0.75) { ai.dir = a; break; }
-      }
-      p.input.mx = Math.cos(ai.dir);
-      p.input.my = Math.sin(ai.dir);
+      goal = ai.wander;
     }
 
-    // aim with a rough lead, and shoot when there is a clear line
-    if (target) {
+    // movement
+    let mx = 0, my = 0;
+    if (fight) {
+      if (this.t >= ai.next) { ai.next = this.t + 0.25 + Math.random() * 0.2; if (Math.random() < 0.15) ai.strafe *= -1; }
+      const toT = Math.atan2(target.y - p.y, target.x - p.x);
+      let a = dist > 380 ? toT : dist < 180 ? toT + Math.PI + ai.strafe * 0.6 : toT + ai.strafe * Math.PI / 2;
+      for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
+        const q = { x: p.x, y: p.y };
+        move(q, { mx: Math.cos(a + off), my: Math.sin(a + off) }, 0.25, walls);
+        if (Math.hypot(q.x - p.x, q.y - p.y) > SPEED * 0.25 * 0.7) { a += off; break; }
+      }
+      mx = Math.cos(a); my = Math.sin(a);
+      ai.path = [];
+    } else if (goal) {
+      const gk = `${Math.round(goal.x / 40)},${Math.round(goal.y / 40)}`;
+      if (gk !== ai.goalKey || this.t >= ai.repath || !ai.path.length) {
+        ai.goalKey = gk;
+        ai.repath = this.t + 1;
+        ai.path = this.findPath(p.x, p.y, goal.x, goal.y);
+      }
+      // skip waypoints we can already walk straight to
+      while (ai.path.length > 1 && this.clearWalk(p.x, p.y, ai.path[1][0], ai.path[1][1])) ai.path.shift();
+      const wp = ai.path[0] || [goal.x, goal.y];
+      if (Math.hypot(wp[0] - p.x, wp[1] - p.y) < 14 && ai.path.length) ai.path.shift();
+      const a = Math.atan2(wp[1] - p.y, wp[0] - p.x);
+      mx = Math.cos(a); my = Math.sin(a);
+    }
+    // stuck? try a random nudge and re-plan
+    if (this.t - (ai.lastPos.t || 0) > 0.8) {
+      if ((mx || my) && Math.hypot(p.x - ai.lastPos.x, p.y - ai.lastPos.y) < 20) { ai.nudge = { a: Math.random() * Math.PI * 2, until: this.t + 0.4 }; ai.repath = 0; }
+      ai.lastPos = { x: p.x, y: p.y, t: this.t };
+    }
+    if (ai.nudge && this.t < ai.nudge.until) { mx = Math.cos(ai.nudge.a); my = Math.sin(ai.nudge.a); }
+    p.input.mx = mx; p.input.my = my;
+
+    // looking / aiming
+    let want, turn = 0.12;
+    if (fight) {
       const prev = ai.prev[target.id];
       const vx = prev ? (target.x - prev.x) / TICK : 0, vy = prev ? (target.y - prev.y) / TICK : 0;
       ai.prev = { [target.id]: { x: target.x, y: target.y } };
       const lead = (dist / BULLET_SPEED) * 0.8;
-      const want = Math.atan2(target.y + vy * lead - p.y, target.x + vx * lead - p.x);
-      ai.wobble = (ai.wobble || 0) * 0.9 + (Math.random() - 0.5) * 0.06;
-      let da = want + ai.wobble - p.input.a;
-      da = Math.atan2(Math.sin(da), Math.cos(da));
-      p.input.a += da * 0.35; // turn smoothly, not instantly
-      if (los) ai.seen += TICK; else ai.seen = 0;
-      p.input.f = los && dist < 620 && ai.seen > 0.35 && Math.abs(da) < 0.3 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
-    } else p.input.f = false;
+      ai.wobble = (ai.wobble || 0) * 0.9 + (Math.random() - 0.5) * 0.07;
+      want = Math.atan2(target.y + vy * lead - p.y, target.x + vx * lead - p.x) + ai.wobble;
+      turn = 0.3;
+    } else if (look && Math.hypot(look.x - p.x, look.y - p.y) > 40) {
+      want = Math.atan2(look.y - p.y, look.x - p.x);
+      turn = ai.heard?.hit ? 0.25 : 0.15;
+    } else if (mx || my) {
+      want = Math.atan2(my, mx) + Math.sin(this.t * 1.7 + p.x * 0.01) * 0.6; // glance around while walking
+    } else want = p.input.a + 0.03;
+    let da = want - p.input.a;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    p.input.a += da * turn;
+    p.input.f = fight && dist < 650 && ai.seen > 0.4 && Math.abs(da) < 0.25 && this.t >= p.protect - SPAWN_SHIELD + 0.5;
+  }
+
+  // Can a player walk straight from a to b? (checks the two edges of the body, not just the middle)
+  clearWalk(ax, ay, bx, by) {
+    const a = Math.atan2(by - ay, bx - ax), ox = -Math.sin(a) * (R - 2), oy = Math.cos(a) * (R - 2);
+    return !blocked(ax + ox, ay + oy, bx + ox, by + oy, this.walls) && !blocked(ax - ox, ay - oy, bx - ox, by - oy, this.walls);
+  }
+
+  // A* over a 40-unit grid; cells too close to a wall are closed.
+  findPath(sx, sy, gx, gy) {
+    const C = 40, cols = Math.ceil(W / C), rows = Math.ceil(H / C);
+    if (!this.grids) this.grids = {};
+    let grid = this.grids[this.map];
+    if (!grid) {
+      grid = new Uint8Array(cols * rows);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const x = i * C + C / 2, y = j * C + C / 2;
+        grid[j * cols + i] = x < R || y < R || x > W - R || y > H - R || insideWall(x, y, this.walls, R + 4) ? 1 : 0;
+      }
+      this.grids[this.map] = grid;
+    }
+    const cell = (x, y) => [Math.max(0, Math.min(cols - 1, Math.floor(x / C))), Math.max(0, Math.min(rows - 1, Math.floor(y / C)))];
+    const nearestOpen = ([i, j]) => {
+      if (!grid[j * cols + i]) return [i, j];
+      for (let r = 1; r < 6; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+        const a = i + di, b = j + dj;
+        if (a >= 0 && b >= 0 && a < cols && b < rows && !grid[b * cols + a]) return [a, b];
+      }
+      return [i, j];
+    };
+    const [si, sj] = nearestOpen(cell(sx, sy)), [gi, gj] = nearestOpen(cell(gx, gy));
+    const start = sj * cols + si, goal = gj * cols + gi;
+    const gScore = new Float32Array(cols * rows).fill(Infinity), from = new Int32Array(cols * rows).fill(-1);
+    const closed = new Uint8Array(cols * rows);
+    gScore[start] = 0;
+    const open = [[Math.hypot(gi - si, gj - sj), start]];
+    while (open.length) {
+      let bi = 0;
+      for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
+      const [, cur] = open.splice(bi, 1)[0];
+      if (cur === goal) break;
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      const ci = cur % cols, cj = (cur - ci) / cols;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        if (!di && !dj) continue;
+        const ni = ci + di, nj = cj + dj;
+        if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) continue;
+        const n = nj * cols + ni;
+        if (grid[n] || closed[n]) continue;
+        if (di && dj && (grid[cj * cols + ni] || grid[nj * cols + ci])) continue; // no corner cutting
+        const gs = gScore[cur] + (di && dj ? 1.414 : 1);
+        if (gs < gScore[n]) { gScore[n] = gs; from[n] = cur; open.push([gs + Math.hypot(gi - ni, gj - nj), n]); }
+      }
+    }
+    if (from[goal] === -1 && goal !== start) return [[gx, gy]];
+    const path = [];
+    for (let c = goal; c !== start && c !== -1; c = from[c]) path.unshift([(c % cols) * C + C / 2, Math.floor(c / cols) * C + C / 2]);
+    path.push([gx, gy]);
+    return path;
   }
 
   // ---------- messages ----------
+  // Each player gets their own snapshot: only the players they can see (spectators and the dead
+  // see everyone), footsteps of the ones they can't, and only events they could notice.
   sendSnapshot(to = null) {
-    const players = [];
     const ack = {};
+    const all = [];
     for (const p of this.players.values()) {
       if (!p.inRound) continue;
       const flags = (this.t < p.buffs.triple ? 1 : 0) | (this.t < p.buffs.speed ? 2 : 0) | (this.t < p.protect ? 4 : 0);
-      players.push([p.id, r1(p.x), r1(p.y), r2(p.aim), Math.ceil(p.hp), p.alive ? 1 : 0, Math.ceil(p.shield), flags,
-        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t))]);
+      all.push({ p, row: [p.id, r1(p.x), r1(p.y), r2(p.aim), Math.ceil(p.hp), p.alive ? 1 : 0, Math.ceil(p.shield), flags,
+        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t))] });
       if (!p.bot) ack[p.id] = p.lastSeq;
     }
-    const msg = {
+    const base = {
       t: 's', n: this.tickNo, ph: this.phase,
       tl: this.phase === 'count' ? r1(this.countEnd - this.t) : this.mode === 'dm' ? r1(Math.max(0, this.endAt - this.t)) : null,
-      z: this.mode === 'lms' && this.zone ? [this.zone.x, this.zone.y, r1(this.zone.r)] : null,
-      ack, p: players,
-      b: this.bullets.map(b => [b.id, r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.owner]),
+      z: this.mode === 'lms' && this.zone ? [r1(this.zone.x), r1(this.zone.y), r1(this.zone.r)] : null,
+      ack,
       u: this.pickups.map(u => [u.id, u.type, r1(u.x), r1(u.y)]),
-      ev: this.events,
     };
-    this.events = [];
-    const s = JSON.stringify(msg);
-    for (const ws of to || this.sockets.keys()) { try { ws.send(s); } catch {} }
+    const walls = this.walls;
+    for (const ws of to || this.sockets.keys()) {
+      const v = this.players.get(this.sockets.get(ws));
+      const seesAll = !v || !v.inRound || !v.alive || this.phase !== 'play';
+      const sees = (x, y) => seesAll || canSee(v.x, v.y, v.aim, x, y, walls);
+      const visible = new Set();
+      const rows = [];
+      for (const { p, row } of all) {
+        if (p === v || !p.alive || sees(p.x, p.y)) { rows.push(row); if (p.alive) visible.add(p.id); }
+        else rows.push([p.id, 0, 0, 0, 0, 2, 0, 0, 0]); // alive but hidden (alive = 2, keeps counts right)
+      }
+      const near = (x, y, d) => seesAll || Math.hypot(x - v.x, y - v.y) < d;
+      const ev = this.events.filter(e => {
+        if (e.k === 'kill' || e.k === 'start' || e.k === 'go' || e.k === 'end' || e.k === 'spawn') return true;
+        if (e.v === v?.id || e.by === v?.id || e.id === v?.id) return true;
+        if (e.k === 'shot') return near(e.x, e.y, 900);
+        return e.x === undefined || sees(e.x, e.y);
+      }).map(e => (e.k === 'kill' && e.x !== undefined && !sees(e.x, e.y) && e.a !== v?.id && e.v !== v?.id ? { k: e.k, a: e.a, v: e.v } : e));
+      const msg = {
+        ...base, p: rows, ev,
+        b: this.bullets.filter(b => b.owner === v?.id || sees(b.x, b.y)).map(b => [b.id, r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.owner]),
+        fs: seesAll ? [] : this.steps.filter(st => st[4] !== v.id && !visible.has(st[4]) && near(st[0], st[1], 1100)).map(st => st.slice(0, 4)),
+      };
+      try { ws.send(JSON.stringify(msg)); } catch {}
+    }
+    if (!to) { this.events = []; this.steps = []; }
   }
 
   sendMeta() {
