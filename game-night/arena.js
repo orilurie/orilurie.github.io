@@ -5,15 +5,16 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=42';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=42';
-import * as gfx from './arena-gfx.js?v=42';
-import { sound } from './arena-audio.js?v=42';
+} from './arena-core.js?v=43';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=43';
+import * as gfx from './arena-gfx.js?v=43';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=43';
+import { sound } from './arena-audio.js?v=43';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 42;
+export const VERSION = 43;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -895,6 +896,7 @@ function renderHome() {
           <li>🔊 <a href="sounds.html">לשמוע את הצלילים ולבחור צליל יריה</a></li>
         </ul>
       </details>
+      <button class="ghost gfx-toggle" data-act="gfx">🎨 גרפיקה: ${gfxMode() === 'rich' ? 'מלאה' : 'פשוטה (קלה לטלפון)'} <small>(לחצו להחלפה)</small></button>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
@@ -993,6 +995,7 @@ document.addEventListener('click', async e => {
     case 'start': play('pop'); return send({ t: 'start' });
     case 'toLobby': return send({ t: 'lobby' });
     case 'sound': toggleSfx('sound'); return;
+    case 'gfx': setGfxMode(gfxMode() === 'rich' ? 'simple' : 'rich'); return render();
   }
 });
 

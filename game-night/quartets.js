@@ -4,7 +4,7 @@
 // to the next player (one question per turn). Complete quartets are laid down automatically. A player with
 // no cards left is out. When every quartet is down, whoever has the most wins.
 
-import { shuffle, fairOrder } from './util.js?v=42';
+import { shuffle, fairOrder } from './util.js?v=43';
 
 export const RANKS = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 export const SUITS = ['♠', '♥', '♦', '♣'];

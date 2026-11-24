@@ -1,6 +1,8 @@
 // זירה – graphics: sprites and effects from Kenney's "Top-down Shooter" and "Particle Pack"
 // (both CC0, see arena-gfx/LICENSE-*), plus pseudo-3D walls and soft lighting.
 
+import { isRich } from './gfx-mode.js?v=43';
+
 const BASE = 'arena-gfx/';
 const imgs = {};
 const load = n => {
@@ -55,6 +57,14 @@ function pattern(g, name) {
 
 // floor of the arena, with a few decorations scattered (same every time for a map)
 export function drawFloor(g, map, W, H) {
+  if (!isRich()) { // simple: flat floor with a grid
+    g.fillStyle = '#1c2436'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,255,255,0.045)'; g.lineWidth = 2; g.beginPath();
+    for (let x = 50; x < W; x += 50) { g.moveTo(x, 0); g.lineTo(x, H); }
+    for (let y = 50; y < H; y += 50) { g.moveTo(0, y); g.lineTo(W, y); }
+    g.stroke(); g.strokeStyle = '#4b5b80'; g.lineWidth = 6; g.strokeRect(-3, -3, W + 6, H + 6);
+    return;
+  }
   const look = MAP_LOOK[map] || MAP_LOOK[0];
   const p = pattern(g, look.floor);
   g.fillStyle = p || '#1c2436';
@@ -79,6 +89,15 @@ export function drawFloor(g, map, W, H) {
 // Walls with height: a shadow, a darker front face and a textured top. Draw them after the
 // players, so someone standing behind a wall is partly hidden by it, like in a 3D view.
 export function drawWalls(g, map, walls) {
+  if (!isRich()) {
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    for (const [x, y, w, h] of walls) g.fillRect(x + 6, y + 9, w, h);
+    for (const [x, y, w, h] of walls) {
+      g.fillStyle = '#3d4a68'; g.fillRect(x, y, w, h);
+      g.fillStyle = '#56668f'; g.fillRect(x, y, w, 6);
+    }
+    return;
+  }
   const look = MAP_LOOK[map] || MAP_LOOK[0];
   g.fillStyle = 'rgba(0,0,0,0.32)';
   for (const [x, y, w, h] of walls) g.fillRect(x + 8, y + 6, w, h);
@@ -100,7 +119,7 @@ export function drawWalls(g, map, walls) {
 }
 
 export function drawBush(g, x, y, r, now, faded) {
-  const i = load('tile_183');
+  const i = isRich() ? load('tile_183') : null;
   g.globalAlpha = faded ? 0.5 : 1;
   if (ready(i)) {
     const sway = Math.sin(now / 900 + x) * 0.04;
@@ -116,6 +135,7 @@ export function drawBush(g, x, y, r, now, faded) {
 // A character sprite, turned to where it aims, with a coloured ring at its feet.
 // o: { x, y, aim, w (weapon), moving (0..1), dash, flash (0..1), bot }
 export function drawCharacter(g, o, seat, color, now) {
+  if (!isRich()) return drawBlob(g, o, color);
   const name = `${o.bot ? 'robot1' : CHARACTERS[seat % CHARACTERS.length]}_${POSE[o.w] || 'gun'}`;
   const i = load(name);
   // shadow + ring
@@ -146,6 +166,13 @@ export function drawCharacter(g, o, seat, color, now) {
 }
 
 export function drawMuzzle(g, x, y, a, big, life) {
+  if (!isRich()) {
+    const len = big ? 34 : 22, wid = big ? 14 : 9;
+    g.save(); g.translate(x + Math.cos(a) * 36, y + Math.sin(a) * 36); g.rotate(a);
+    g.fillStyle = '#ffe9a8'; g.beginPath(); g.moveTo(0, -wid / 2); g.lineTo(len, 0); g.lineTo(0, wid / 2); g.closePath(); g.fill();
+    g.restore();
+    return;
+  }
   const t = tint('muzzle_02', '#ffe08a');
   if (!t) return;
   const s = (big ? 70 : 48) * (0.7 + life * 5);
@@ -158,6 +185,7 @@ export function drawMuzzle(g, x, y, a, big, life) {
 }
 
 export function drawGlow(g, x, y, r, color, alpha = 1) {
+  if (!isRich()) return;
   const t = tint('circle_05', color);
   if (!t) return;
   g.save();
@@ -168,6 +196,7 @@ export function drawGlow(g, x, y, r, color, alpha = 1) {
 }
 
 export function drawSprite(g, name, color, x, y, size, rot = 0, alpha = 1, additive = false) {
+  if (!isRich()) return;
   const t = tint(name, color);
   if (!t) return;
   g.save();
@@ -182,6 +211,16 @@ export function drawSprite(g, name, color, x, y, size, rot = 0, alpha = 1, addit
 // what you can see for free. lights: [{ x, y, r, a }] in world units, poly: the view polygon.
 const lightCanvas = document.createElement('canvas');
 export function drawDarkness(g, view, cw, ch, dpr, poly, lights) {
+  if (!isRich()) { // simple: a flat shade outside the view polygon (world coordinates)
+    g.fillStyle = 'rgba(6,9,18,0.62)';
+    g.beginPath();
+    g.rect(view.x - cw / view.s, view.y - ch / view.s, (cw / view.s) * 2, (ch / view.s) * 2);
+    g.moveTo(poly[0], poly[1]);
+    for (let i = 2; i < poly.length; i += 2) g.lineTo(poly[i], poly[i + 1]);
+    g.closePath();
+    g.fill('evenodd');
+    return;
+  }
   const k = 0.25;
   const lw = Math.max(1, Math.round(cw * k)), lh = Math.max(1, Math.round(ch * k));
   if (lightCanvas.width !== lw || lightCanvas.height !== lh) { lightCanvas.width = lw; lightCanvas.height = lh; }
@@ -223,6 +262,15 @@ const BULLET_LOOK = {
   sniper: { head: 'bulletDark3', hw: 4, hh: 18, trace: 'trace_01', len: 160, wid: 26 },
 };
 export function drawBullet(g, x, y, vx, vy, color, weapon) {
+  if (!isRich()) {
+    const l = Math.hypot(vx, vy) || 1;
+    g.strokeStyle = color; g.globalAlpha = 0.45; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(x - (vx / l) * 18, y - (vy / l) * 18); g.lineTo(x, y); g.stroke();
+    g.globalAlpha = 1; g.fillStyle = '#fff';
+    g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = color; g.lineWidth = 2; g.stroke();
+    return;
+  }
   const L = BULLET_LOOK[weapon] || BULLET_LOOK.pistol;
   const a = Math.atan2(vy, vx);
   const tr = tint(L.trace, color);
@@ -246,4 +294,27 @@ export function drawBullet(g, x, y, vx, vy, color, weapon) {
 // sparks where a bullet hits a wall
 export function drawSpark(g, x, y, size, rot, alpha) {
   drawSprite(g, 'spark_05', '#ffd98a', x, y, size, rot, alpha, true);
+}
+
+// simple mode: the original round character with eyes and a gun
+function drawBlob(g, o, color) {
+  const R = 18;
+  g.fillStyle = 'rgba(0,0,0,0.35)';
+  g.beginPath(); g.ellipse(o.x + 4, o.y + 8, R, R * 0.7, 0, 0, Math.PI * 2); g.fill();
+  g.save(); g.translate(o.x, o.y); g.rotate(o.aim);
+  const look = { pistol: [22, 10], smg: [18, 12], shotgun: [26, 14], sniper: [40, 8] }[o.w] || [22, 10];
+  g.fillStyle = '#20242e'; g.fillRect(R - 6, -look[1] / 2, look[0], look[1]);
+  g.fillStyle = color; g.fillRect(R - 10 + look[0], -look[1] / 2, 4, look[1]);
+  g.restore();
+  g.fillStyle = color;
+  g.beginPath(); g.arc(o.x, o.y, R, 0, Math.PI * 2); g.fill();
+  g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.45)'; g.stroke();
+  const ex = Math.cos(o.aim) * 6, ey = Math.sin(o.aim) * 6;
+  for (const side of [-1, 1]) {
+    const ox = -Math.sin(o.aim) * 6 * side, oy = Math.cos(o.aim) * 6 * side;
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(o.x + ex * 0.5 + ox, o.y + ey * 0.5 + oy, 4.5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#111'; g.beginPath(); g.arc(o.x + ex * 0.8 + ox, o.y + ey * 0.8 + oy, 2.2, 0, Math.PI * 2); g.fill();
+  }
+  if (o.flash > 0) { g.fillStyle = `rgba(255,255,255,${o.flash})`; g.beginPath(); g.arc(o.x, o.y, R, 0, Math.PI * 2); g.fill(); }
+  return true;
 }

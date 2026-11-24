@@ -1,24 +1,25 @@
-import * as Hathatul from './game.js?v=42';
-import * as Quartets from './quartets.js?v=42';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=42';
-import * as Battleship from './battleship.js?v=42';
-import * as Imposter from './imposter.js?v=42';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=42';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=42';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=42';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=42';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=42';
+import * as Hathatul from './game.js?v=43';
+import * as Quartets from './quartets.js?v=43';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=43';
+import * as Battleship from './battleship.js?v=43';
+import * as Imposter from './imposter.js?v=43';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=43';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=43';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=43';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=43';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=43';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=43';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
 const GAMES = {
-  hathatul: { rules: Hathatul, name: 'חתחתול', icon: '🐱', blurb: 'שמרו את החתולים, היפטרו מהעכברים!' },
-  quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
-  battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
-  imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
+  hathatul: { rules: Hathatul, name: 'חתחתול', icon: '🐱', art: 'cat', blurb: 'שמרו את החתולים, היפטרו מהעכברים!' },
+  quartets: { rules: Quartets, name: 'רביעיות', icon: '🃏', art: 'spade', blurb: 'אספו רביעיות: שאלו את החברים על קלפים וזכרו מי ביקש מה!' },
+  battleship: { rules: Battleship, name: 'צוללות', icon: '🚢', art: 'ship', blurb: 'קרב ימי בתלת־ממד, אחד על אחד. הטביעו את הצי של היריב!' },
+  imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', art: 'detective', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 42; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 43; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -410,11 +411,11 @@ function cardHtml(c, { size = '', act = '', data = '', cls = '', k = '' } = {}) 
   if (!c) return `<div class="card back ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><span>🐾</span></div>`;
   if (c.kind === 'power') {
     const p = POWERS[c.power];
-    return `<div class="card power ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><b>${p.icon}</b><small>${p.label}</small></div>`;
+    return `<div class="card power ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}><b>${p.icon}</b><img class="art" src="art/${{ peek: 'eyes', swap: 'swap', draw2: 'victory' }[c.power]}.png" alt="" draggable="false"><small>${p.label}</small></div>`;
   }
   const cat = c.value <= 6;
   return `<div class="card num ${cat ? 'cat' : 'mouse'} ${size} ${cls} ${act ? 'clickable' : ''}" ${attrs}>
-    <i class="corner">${c.value}</i><b>${c.value}</b><span>${cat ? '🐱' : '🐭'}</span></div>`;
+    <i class="corner">${c.value}</i><b>${c.value}</b><span>${cat ? '🐱' : '🐭'}</span><img class="art" src="art/${cat ? 'cat' : 'mouse'}.png" alt="" draggable="false"></div>`;
 }
 
 function render() {
@@ -469,12 +470,12 @@ const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגוב
 function renderHome() {
   $app.innerHTML = `
     <div class="panel home">
-      <div class="brand">🎲 ערב משחקים</div>
+      <div class="brand"><img class="brand-art" src="art/die.png" alt=""><span class="brand-emoji">🎲</span> ערב משחקים</div>
       <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥', imposter: '🕵️🤫' }[ui.gameType] || '🐱🐭'}</span></h1>
       <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
         ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
-          <span class="gc-icon">${g.icon}</span><b>${g.name}</b></button>`).join('')}
-        <a class="game-card" href="arena.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🔫</span><b>זירה</b><small>יריות בזמן אמת</small></a>
+          <span class="gc-icon">${g.icon}</span><img class="gc-art" src="art/${g.art}.png" alt=""><b>${g.name}</b></button>`).join('')}
+        <a class="game-card gc-arena" href="arena.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🔫</span><img class="gc-art" src="art/pistol.png" alt=""><b>זירה</b><small>יריות בזמן אמת</small></a>
       </div>
       <p class="sub">${{ battleship: 'משחק אונליין לשני שחקנים.', imposter: 'משחק מילים אונליין ל-3 עד 6 שחקנים.' }[ui.gameType] || 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
@@ -493,6 +494,7 @@ function renderHome() {
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
       ${installHtml()}
       <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${{ quartets: quartetsRulesHtml, battleship: battleshipRulesHtml, imposter: imposterRulesHtml }[ui.gameType]?.() || rulesHtml()}</details>
+      <button class="ghost gfx-toggle" data-act="gfx">🎨 גרפיקה: ${gfxMode() === 'rich' ? 'מלאה' : 'פשוטה'} <small>(לחצו להחלפה)</small></button>
       <p class="version">גרסה ${VERSION}</p>
     </div>`;
 }
@@ -977,6 +979,7 @@ function onAct(el) {
     case 'imSpoken': case 'imSkip': case 'imPick': case 'imVote': case 'imClose': case 'imGuess': case 'imSkipGuess':
       if (imposterAct(act, el, ui, send)) render();
       return;
+    case 'gfx': setGfxMode(gfxMode() === 'rich' ? 'simple' : 'rich'); return render();
     case 'pickGame':
       ui.gameType = el.dataset.g;
       store.set('hathatul-game', ui.gameType);

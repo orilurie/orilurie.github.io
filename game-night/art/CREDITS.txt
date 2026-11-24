@@ -1,0 +1,4 @@
+Art used by ערב משחקים in "full graphics" mode:
+- 3D illustrations (cat, mouse, die, ship, detective, pistol, eyes, swap, victory hand, spade, crown, paws, shush):
+  Microsoft Fluent Emoji, MIT license (LICENSE-fluent-emoji.txt), resized to 128 px
+- playing cards and card backs (cards/): Kenney "Boardgame Pack", CC0

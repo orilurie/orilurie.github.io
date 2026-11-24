@@ -1,7 +1,7 @@
 // המתחזה – screens and interactions. Rendering is driven by app.js.
 
-import { play, haptic } from './sfx.js?v=42';
-import { confetti } from './anim.js?v=42';
+import { play, haptic } from './sfx.js?v=43';
+import { confetti } from './anim.js?v=43';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -28,7 +28,7 @@ function playerChip(v, i, extra = '') {
 function secretCard(v, ui) {
   const open = ui.imPeek;
   const front = v.role === 'imposter'
-    ? `<div class="im-role imp">🕵️ אתה המתחזה!</div>
+    ? `<img class="art im-art" src="art/detective.png" alt=""><div class="im-role imp">🕵️ אתה המתחזה!</div>
        <div class="im-sub">${v.k === 2 ? 'יש עוד מתחזה אחד – אבל לא תדעו מי.' : 'כולם יודעים את המילה – חוץ ממך.'}</div>
        ${v.hint ? `<div class="im-hintlabel">הרמז שלך:</div><div class="im-word">${esc(v.hint)}</div>` : '<div class="im-hintlabel">אין רמז בסבב הזה – הקשיבו לאחרים ונסו להשתלב 🤐</div>'}`
     : `<div class="im-role cit">המילה הסודית</div>
@@ -36,7 +36,7 @@ function secretCard(v, ui) {
        <div class="im-sub">קטגוריה: ${esc(v.category)}</div>`;
   return `<div class="im-card ${open ? 'open' : ''}" data-act="imPeek" role="button" tabindex="0" aria-label="הצצה בכרטיס">
     <div class="im-card-inner">
-      <div class="im-face im-back"><span>🤫</span><b>לחצו כדי להציץ</b><small>שימו לב שאף אחד לא מסתכל</small></div>
+      <div class="im-face im-back"><span>🤫</span><img class="art" src="art/shush.png" alt=""><b>לחצו כדי להציץ</b><small>שימו לב שאף אחד לא מסתכל</small><i class="stamp">סודי ביותר</i></div>
       <div class="im-face im-front">${front}</div>
     </div>
   </div>`;
