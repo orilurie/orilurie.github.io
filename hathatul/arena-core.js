@@ -97,13 +97,22 @@ export function collide(p, walls, r = R) {
 }
 
 // One movement step. input.mx/my is a joystick vector (length ≤ 1).
-export function move(p, input, dt, walls, speedMul = 1) {
+// Movement is quick but not instant: you reach ~90% speed in about 0.08 s and stop just as fast
+// (crisp, with a touch of weight). Sliding along walls comes from the circle collision; speed
+// into a wall is dropped so you don't "stick" to it. instant: skip the ramp (dash, bot probes).
+export const ACCEL = 28;
+export function move(p, input, dt, walls, speedMul = 1, instant = false) {
   let mx = input.mx || 0, my = input.my || 0;
   const len = Math.hypot(mx, my);
   if (len > 1) { mx /= len; my /= len; }
-  p.x += mx * SPEED * speedMul * dt;
-  p.y += my * SPEED * speedMul * dt;
+  const tvx = mx * SPEED * speedMul, tvy = my * SPEED * speedMul;
+  const k = instant ? 1 : 1 - Math.exp(-ACCEL * dt);
+  p.vx = (p.vx || 0) + (tvx - (p.vx || 0)) * k;
+  p.vy = (p.vy || 0) + (tvy - (p.vy || 0)) * k;
+  const x0 = p.x, y0 = p.y, ex = x0 + p.vx * dt, ey = y0 + p.vy * dt;
+  p.x = ex; p.y = ey;
   collide(p, walls);
+  if (dt > 0 && (Math.abs(p.x - ex) > 0.01 || Math.abs(p.y - ey) > 0.01)) { p.vx = (p.x - x0) / dt; p.vy = (p.y - y0) / dt; }
 }
 
 export const insideWall = (x, y, walls, pad = 0) =>

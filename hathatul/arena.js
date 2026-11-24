@@ -5,14 +5,14 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=35';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=35';
-import { sound } from './arena-audio.js?v=35';
+} from './arena-core.js?v=36';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=36';
+import { sound } from './arena-audio.js?v=36';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 35;
+export const VERSION = 36;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -222,8 +222,13 @@ function readInput(me) {
   if (keys.has('KeyW') || keys.has('ArrowUp')) my -= 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) my += 1;
   if (sticks.move) {
-    const dx = sticks.move.x - sticks.move.ox, dy = sticks.move.y - sticks.move.oy, l = Math.hypot(dx, dy);
-    if (l > 6) { const k = Math.min(1, l / STICK) / l; mx = dx * k; my = dy * k; }
+    // floating stick: small scaled dead zone, full speed at under half the radius (on a phone
+    // you almost always want full speed), and the base follows your thumb if you drag past it
+    const st = sticks.move;
+    let dx = st.x - st.ox, dy = st.y - st.oy, l = Math.hypot(dx, dy);
+    if (l > STICK) { st.ox = st.x - (dx / l) * STICK; st.oy = st.y - (dy / l) * STICK; dx = st.x - st.ox; dy = st.y - st.oy; l = STICK; }
+    const DZ = 7;
+    if (l > DZ) { const mag = Math.min(1, (l - DZ) / (STICK * 0.42)); mx = (dx / l) * mag; my = (dy / l) * mag; }
   }
   const l = Math.hypot(mx, my);
   if (l > 1) { mx /= l; my /= l; }
@@ -231,7 +236,10 @@ function readInput(me) {
   input.my = Math.round(my * 100) / 100;
   input.f = false;
   if (sticks.aim) {
-    const dx = sticks.aim.x - sticks.aim.ox, dy = sticks.aim.y - sticks.aim.oy;
+    const st = sticks.aim;
+    let dx = st.x - st.ox, dy = st.y - st.oy;
+    const la = Math.hypot(dx, dy);
+    if (la > STICK) { st.ox = st.x - (dx / la) * STICK; st.oy = st.y - (dy / la) * STICK; dx = st.x - st.ox; dy = st.y - st.oy; }
     if (Math.hypot(dx, dy) > 14) input.a = Math.atan2(dy, dx);
     else if (me) { const t = autoTarget(me); if (t) input.a = Math.atan2(t.y - me.y, t.x - me.x); }
     input.f = true;
@@ -261,7 +269,8 @@ function autoTarget(me) {
 
 // ---------------------------------------------------------------------------------------------
 // Prediction
-let seq = 0, lastSent = 0, sentKey = '', sentF = false, sentDash = 0;
+let seq = 0, lastSent = 0, sentF = false;
+const outbox = []; // movement steps not sent yet
 const pending = []; // { seq, mx, my, dt, mul }
 let me = null; // predicted { x, y }
 let localCd = 0, myShotNo = 0, kick = 0;
@@ -291,12 +300,13 @@ function reconcile(s) {
   if (!sp) { me = null; return; }
   if (!sp[5]) { me = { x: sp[1], y: sp[2], dead: true }; pending.length = 0; return; }
   const ack = s.ack?.[myId] ?? 0;
-  while (pending.length && pending[0].seq < ack) pending.shift();
-  // replay what the server hasn't seen yet on top of its position
-  const q = { x: sp[1], y: sp[2] };
-  for (const u of pending) move(q, u, u.seq === ack ? u.dt * 0.5 : u.dt, walls(), u.mul);
-  if (!me || me.dead) { me = { x: q.x, y: q.y, cx: 0, cy: 0 }; return; }
+  while (pending.length && pending[0].seq <= ack) pending.shift();
+  // replay the steps the server hasn't applied yet on top of its position
+  const q = { x: sp[1], y: sp[2], vx: sp[10] || 0, vy: sp[11] || 0 };
+  for (const u of pending) move(q, u, u.dt, walls(), u.mul, u.dash);
+  if (!me || me.dead) { me = { x: q.x, y: q.y, vx: q.vx, vy: q.vy, cx: 0, cy: 0 }; return; }
   me.cx = q.x - me.x; me.cy = q.y - me.y; // blended in over the next frames
+  if (debugOn) (window.__corr ||= []).push(Math.hypot(me.cx, me.cy));
   if (Math.hypot(me.cx, me.cy) > 90) { me.x = q.x; me.y = q.y; me.cx = me.cy = 0; }
 }
 
@@ -304,26 +314,21 @@ function stepLocal(dt) {
   const sp = myServer();
   const playing = meta?.phase === 'play' && lastSnap?.ph === 'play';
   readInput(me && !me.dead ? me : null);
-  // send input ~15 times a second while it changes, and at least every 250 ms
   const now = performance.now();
-  const key = `${input.mx},${input.my},${input.a},${input.f},${dashCount}`;
-  // fire / dash changes go out at once; other changes at most 20 times a second
-  const urgent = input.f !== sentF || dashCount !== sentDash;
-  if (inGame() && ((key !== sentKey && (urgent || now - lastSent > 50)) || now - lastSent > 250)) {
-    sentF = input.f; sentDash = dashCount;
-    seq++;
-    sentKey = key;
-    lastSent = now;
-    send({ t: 'in', s: seq, mx: input.mx, my: input.my, a: input.a, f: input.f ? 1 : 0, d: dashCount });
-  }
-  if (me && !me.dead && sp && sp[5] && playing) {
+  const alive = me && !me.dead && sp && sp[5] && playing;
+  if (alive) {
+    // every frame is one movement step [seq, mx, my, dt, dash]; the server replays the same steps
     localDash.cd -= dt;
     let u;
-    if (localDash.t > 0) { localDash.t -= dt; u = { seq, ...localDash.dir, dt, mul: DASH.speed }; ghosts.push({ x: me.x, y: me.y, id: myId, life: 0.25 }); }
-    else { const mul = sp[7] & 2 ? 1.4 : 1; u = { seq, mx: input.mx, my: input.my, dt, mul }; }
+    if (localDash.t > 0) {
+      u = { seq: ++seq, ...localDash.dir, dt, mul: DASH.speed, dash: true, d: localDash.t === DASH.time ? 1 : 0 };
+      localDash.t -= dt;
+      ghosts.push({ x: me.x, y: me.y, id: myId, life: 0.25 });
+    } else u = { seq: ++seq, mx: input.mx, my: input.my, dt, mul: sp[7] & 2 ? 1.4 : 1 };
+    outbox.push([u.seq, u.dash ? u.mx : input.mx, u.dash ? u.my : input.my, Math.round(dt * 10000) / 10000, u.d || 0]);
     const mul = u.mul;
     const bx = me.x, by = me.y;
-    move(me, u, dt, walls(), mul);
+    move(me, u, dt, walls(), mul, u.dash);
     me.walked = (me.walked || 0) + Math.hypot(me.x - bx, me.y - by);
     if (me.walked > 46) { me.walked = 0; sound('step', { vol: 0.35 }); }
     pending.push(u);
@@ -346,6 +351,13 @@ function stepLocal(dt) {
       const sa = input.a + Math.PI / 2 + (Math.random() - 0.5) * 0.6;
       particles.push({ x: me.x, y: me.y, vx: Math.cos(sa) * 140, vy: Math.sin(sa) * 140, life: 0.5, max: 0.5, color: '#e6b94a', size: 3 });
     }
+  }
+  // send 20 times a second (fire and dash at once); just aim/trigger, slowly, while not playing
+  const urgent = input.f !== sentF || outbox.some(c => c[4]);
+  if (inGame() && ((outbox.length && (urgent || now - lastSent >= 50)) || now - lastSent > 250)) {
+    sentF = input.f;
+    lastSent = now;
+    send({ t: 'in', a: input.a, f: input.f ? 1 : 0, c: outbox.splice(0) });
   }
 
   // predicted bullets
@@ -474,6 +486,7 @@ function handleEvents(evs) {
 // ---------------------------------------------------------------------------------------------
 // Rendering
 let view = { x: W / 2, y: H / 2, s: 1 };
+const look = { x: 0, y: 0 };
 let dpr = 1;
 function resize() {
   dpr = Math.min(2, devicePixelRatio || 1);
@@ -499,7 +512,12 @@ function drawWorld(now, dt) {
   }
   const halfW = cw / 2 / view.s, halfH = ch / 2 / view.s;
   const clampV = (v, half, max) => (half * 2 >= max + 160 ? max / 2 : Math.max(half - 80, Math.min(max + 80 - half, v)));
-  const tx = clampV(focus.x, halfW, W), ty = clampV(focus.y, halfH, H);
+  // look ahead: the camera leans toward where you aim, so you see more of what's in front of you
+  const alive = me && !me.dead && focus === me;
+  const la = alive ? (input.f || sticks.aim || mouse ? 120 : 70) : 0;
+  look.x += (Math.cos(input.a) * la - look.x) * Math.min(1, dt * 4);
+  look.y += (Math.sin(input.a) * la - look.y) * Math.min(1, dt * 4);
+  const tx = clampV(focus.x + look.x, halfW, W), ty = clampV(focus.y + look.y, halfH, H);
   view.x += (tx - view.x) * Math.min(1, dt * 10);
   view.y += (ty - view.y) * Math.min(1, dt * 10);
 

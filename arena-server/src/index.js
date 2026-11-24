@@ -177,11 +177,11 @@ export class Room {
     if (!p) return;
     switch (msg.t) {
       case 'in': {
-        if (!Number.isFinite(msg.s) || msg.s <= p.lastSeq) return;
-        p.lastSeq = msg.s;
-        const mx = Number(msg.mx) || 0, my = Number(msg.my) || 0, l = Math.hypot(mx, my);
-        p.input = { mx: l > 1 ? mx / l : mx, my: l > 1 ? my / l : my, a: Number(msg.a) || 0, f: !!msg.f };
-        if (Number.isFinite(msg.d) && msg.d !== p.dashSeen) { if (p.dashSeen !== undefined) p.wantDash = true; p.dashSeen = msg.d; }
+        // aim and trigger, plus the movement steps the client made since its last message:
+        // [seq, mx, my, dt, dash]. The server replays exactly those steps, so your own
+        // prediction and the server agree (the classic client-prediction model).
+        p.input = { ...p.input, a: Number(msg.a) || 0, f: !!msg.f };
+        if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) this.applyCmd(p, c);
         return;
       }
       case 'cfg': {
@@ -226,6 +226,7 @@ export class Room {
     for (const [w, pid] of this.sockets) if (pid === id && w !== ws) { this.sockets.delete(w); try { w.close(1000, 'replaced'); } catch {} }
     p.name = name;
     p.lvl = Math.max(1, Math.min(99, Number(msg.lvl) || 1));
+    p.lastSeq = 0; // a reloaded page starts counting its steps again
     p.spectator = !!msg.spec; // watch only (used by tests)
     if (p.spectator) p.inRound = false;
     p.on = true;
@@ -333,7 +334,7 @@ export class Room {
       if (d > bestD) { bestD = d; best = { x, y }; }
     }
     best ||= { x: W / 2, y: 80 };
-    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 }, weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, streak: 0, wantDash: false });
+    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 }, vx: 0, vy: 0, weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, streak: 0, wantDash: false });
     collide(p, this.walls);
     this.emit({ k: 'spawn', id: p.id });
   }
@@ -395,8 +396,11 @@ export class Room {
       const inp = p.on || p.bot ? p.input : { mx: 0, my: 0, a: p.aim, f: false };
       p.aim = inp.a;
       if (!playing) continue;
-      const ox = p.x, oy = p.y;
       p.dashCd -= TICK;
+      p.budget = Math.min(0.3, (p.budget || 0) + TICK);
+      if (!p.bot) { /* humans move by their own steps (applyCmd) */ }
+      else {
+      const ox = p.x, oy = p.y;
       if (p.wantDash) {
         p.wantDash = false;
         if (p.dashCd <= 0) {
@@ -408,18 +412,9 @@ export class Room {
           this.emit({ k: 'dash', id: p.id, x: r1(p.x), y: r1(p.y) });
         }
       }
-      if (p.dashT > 0) { p.dashT -= TICK; move(p, p.dashDir, TICK, walls, DASH.speed); }
+      if (p.dashT > 0) { p.dashT -= TICK; move(p, p.dashDir, TICK, walls, DASH.speed, true); }
       else move(p, inp, TICK, walls, this.t < p.buffs.speed ? 1.4 : 1);
-      // footsteps: others can't see you, but they notice your tracks
-      p.walked = (p.walked || 0) + Math.hypot(p.x - ox, p.y - oy);
-      if (p.walked >= STEP) {
-        p.walked = 0;
-        p.side = -(p.side || 1);
-        const step = [r1(p.x), r1(p.y), r2(Math.atan2(p.y - oy, p.x - ox)), p.side, p.id];
-        this.steps.push(step);
-        for (const o of this.players.values()) {
-          if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 480) o.ai.heard = { x: p.x, y: p.y, t: this.t };
-        }
+      this.footsteps(p, ox, oy);
       }
       p.cd -= TICK;
       if (inp.f && p.cd <= 0) {
@@ -532,6 +527,42 @@ export class Room {
     }
   }
 
+  applyCmd(p, c) {
+    if (!Array.isArray(c) || !Number.isFinite(c[0]) || c[0] <= p.lastSeq) return;
+    p.lastSeq = c[0];
+    if (this.phase !== 'play' || !p.alive) return;
+    let mx = Number(c[1]) || 0, my = Number(c[2]) || 0;
+    const l = Math.hypot(mx, my);
+    if (l > 1) { mx /= l; my /= l; }
+    // no speed hacks: a step can't use more time than has actually passed
+    const dt = Math.min(Math.max(0, Number(c[3]) || 0), 0.1, p.budget);
+    p.budget -= dt;
+    if (dt <= 0) return;
+    if (c[4] && p.dashCd <= 0) {
+      const a = l > 0.2 ? Math.atan2(my, mx) : p.input.a;
+      p.dashDir = { mx: Math.cos(a), my: Math.sin(a) };
+      p.dashT = DASH.time;
+      p.dashCd = DASH.cd;
+      this.emit({ k: 'dash', id: p.id, x: r1(p.x), y: r1(p.y) });
+    }
+    const ox = p.x, oy = p.y;
+    if (p.dashT > 0) { move(p, p.dashDir, dt, this.walls, DASH.speed, true); p.dashT -= dt; }
+    else move(p, { mx, my }, dt, this.walls, this.t < p.buffs.speed ? 1.4 : 1);
+    this.footsteps(p, ox, oy);
+  }
+
+  // footsteps: others can't see you, but they notice your tracks
+  footsteps(p, ox, oy) {
+    p.walked = (p.walked || 0) + Math.hypot(p.x - ox, p.y - oy);
+    if (p.walked < STEP) return;
+    p.walked = 0;
+    p.side = -(p.side || 1);
+    this.steps.push([r1(p.x), r1(p.y), r2(Math.atan2(p.y - oy, p.x - ox)), p.side, p.id]);
+    for (const o of this.players.values()) {
+      if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < 480) o.ai.heard = { x: p.x, y: p.y, t: this.t };
+    }
+  }
+
   // Can viewer v see player o? Vision cone + walls, and a bush hides you unless someone is very
   // close or you just fired.
   visible(v, o) {
@@ -585,7 +616,7 @@ export class Room {
       let a = dist > far ? toT : dist < close ? toT + Math.PI + ai.strafe * 0.6 : toT + ai.strafe * Math.PI / 2;
       for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
         const q = { x: p.x, y: p.y };
-        move(q, { mx: Math.cos(a + off), my: Math.sin(a + off) }, 0.25, walls);
+        move(q, { mx: Math.cos(a + off), my: Math.sin(a + off) }, 0.25, walls, 1, true);
         if (Math.hypot(q.x - p.x, q.y - p.y) > SPEED * 0.25 * 0.7) { a += off; break; }
       }
       mx = Math.cos(a); my = Math.sin(a);
@@ -714,7 +745,7 @@ export class Room {
       const flags = (this.t < p.buffs.triple ? 1 : 0) | (this.t < p.buffs.speed ? 2 : 0) | (this.t < p.protect ? 4 : 0)
         | (p.dashT > 0 ? 8 : 0) | (p.streak >= 3 ? 16 : 0) | (inBush(p.x, p.y, this.map) ? 32 : 0);
       all.push({ p, row: [p.id, r1(p.x), r1(p.y), r2(p.aim), Math.ceil(p.hp), p.alive ? 1 : 0, Math.ceil(p.shield), flags,
-        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t)), WEAPON_LIST.indexOf(p.weapon)] });
+        p.alive ? 0 : Math.max(0, r1(p.respawnAt - this.t)), WEAPON_LIST.indexOf(p.weapon), r1(p.vx || 0), r1(p.vy || 0)] });
       if (!p.bot) ack[p.id] = p.lastSeq;
     }
     const base = {
