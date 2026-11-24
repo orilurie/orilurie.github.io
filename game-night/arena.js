@@ -5,16 +5,16 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, INTERP_MS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush,
-} from './arena-core.js?v=46';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=46';
-import * as gfx from './arena-gfx.js?v=46';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=46';
-import { sound } from './arena-audio.js?v=46';
+} from './arena-core.js?v=47';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=47';
+import * as gfx from './arena-gfx.js?v=47';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=47';
+import { sound } from './arena-audio.js?v=47';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 46;
+export const VERSION = 47;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -243,7 +243,7 @@ function readInput(me) {
     let dx = st.x - st.ox, dy = st.y - st.oy;
     const la = Math.hypot(dx, dy);
     if (la > STICK) { st.ox = st.x - (dx / la) * STICK; st.oy = st.y - (dy / la) * STICK; dx = st.x - st.ox; dy = st.y - st.oy; }
-    if (Math.hypot(dx, dy) > 14) input.a = Math.atan2(dy, dx);
+    if (Math.hypot(dx, dy) > 14) input.a = me ? assistAim(me, Math.atan2(dy, dx)) : Math.atan2(dy, dx);
     else if (me) { const t = autoTarget(me); if (t) input.a = Math.atan2(t.y - me.y, t.x - me.x); }
     input.f = true;
   } else if (mouse && me) {
@@ -260,6 +260,25 @@ function readInput(me) {
 }
 
 // Tap-to-shoot on phones: aim at the nearest enemy you can see.
+// Touch aim assist: if an enemy you can see is within a few degrees of where you're
+// aiming, the aim is pulled most of the way onto them (a phone thumb isn't a mouse).
+function assistAim(me, a) {
+  const range = weaponRange();
+  let best = null, bestErr = 0.2;
+  for (const o of others) {
+    if (!o.alive || o.id === myId) continue;
+    const d = Math.hypot(o.x - me.x, o.y - me.y);
+    if (d > range + R || blocked(me.x, me.y, o.x, o.y, walls())) continue;
+    let da = Math.atan2(o.y - me.y, o.x - me.x) - a;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    const tol = Math.max(0.09, Math.atan2(R * 1.6, d)); // wider for close targets
+    if (Math.abs(da) < Math.min(bestErr, tol)) { bestErr = Math.abs(da); best = da; }
+  }
+  return best === null ? a : a + best * 0.8;
+}
+
+const weaponRange = () => { const w = WEAPONS[WEAPON_LIST[lastSnap?.me?.w ?? 0] || 'pistol']; return w.speed * w.life; };
+
 function autoTarget(me) {
   let best = null, bd = 720;
   for (const o of others) {
@@ -620,6 +639,10 @@ function drawWorld(now, dt) {
     lights.push({ x: me.x, y: me.y, r: 160, a: 0.5 });
     gfx.drawDarkness(g, { x: view.x, y: view.y, s: view.s }, cw, ch, dpr, visionPolygon(me.x, me.y, input.a), lights);
   }
+  // aim line (touch: while the aim thumb is down): a dotted line to the weapon's range, stopped by
+  // walls; it turns red with a reticle when it crosses someone you can see. Shotgun: a cone.
+  if (looking && (sticks.aim || !matchMedia('(pointer: fine)').matches)) drawAimLine(now);
+
   // footprints: you can't see them, but you notice their tracks
   for (const f of footprints) {
     g.save();
@@ -744,6 +767,47 @@ function drawMinimap(cw, ch) {
 
 // the server's bullets don't say which weapon fired them; their speed does
 const weaponBySpeed = sp => (sp > 1200 ? 'sniper' : sp < 740 ? 'shotgun' : sp > 800 ? 'smg' : 'pistol');
+function drawAimLine(now) {
+  const wname = WEAPON_LIST[lastSnap?.me?.w ?? 0] || 'pistol', w = WEAPONS[wname];
+  const a = input.a, sx = me.x + Math.cos(a) * (R + 6), sy = me.y + Math.sin(a) * (R + 6);
+  const len = Math.min(w.speed * w.life, rayDist(sx, sy, a, walls(), w.speed * w.life));
+  // first visible enemy on the line
+  let hit = null, hd = len;
+  for (const o of others) {
+    if (!o.alive || o.id === myId) continue;
+    const t = (o.x - sx) * Math.cos(a) + (o.y - sy) * Math.sin(a);
+    if (t < 0 || t > hd) continue;
+    const px = sx + Math.cos(a) * t, py = sy + Math.sin(a) * t;
+    if (Math.hypot(o.x - px, o.y - py) < R + 4) { hd = t; hit = o; }
+  }
+  const active = !!sticks.aim;
+  const color = hit ? '255,90,90' : '255,255,255';
+  g.save();
+  if (w.pellets > 1) { // shotgun spread
+    g.fillStyle = `rgba(${color},${active ? 0.16 : 0.07})`;
+    g.beginPath(); g.moveTo(sx, sy); g.arc(sx, sy, len, a - w.spread / 2, a + w.spread / 2); g.closePath(); g.fill();
+  }
+  g.strokeStyle = `rgba(${color},${active ? 0.75 : 0.28})`;
+  g.lineWidth = active ? 3 : 2;
+  g.setLineDash([10, 9]);
+  g.lineDashOffset = -now / 25;
+  g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + Math.cos(a) * hd, sy + Math.sin(a) * hd); g.stroke();
+  g.setLineDash([]);
+  if (hit) { // reticle on the target
+    g.strokeStyle = 'rgba(255,90,90,0.95)'; g.lineWidth = 2.5;
+    const rr = R + 8 + Math.sin(now / 90) * 2;
+    g.beginPath(); g.arc(hit.x, hit.y, rr, 0, Math.PI * 2); g.stroke();
+    for (let k = 0; k < 4; k++) {
+      const q = k * Math.PI / 2;
+      g.beginPath(); g.moveTo(hit.x + Math.cos(q) * (rr - 6), hit.y + Math.sin(q) * (rr - 6)); g.lineTo(hit.x + Math.cos(q) * (rr + 6), hit.y + Math.sin(q) * (rr + 6)); g.stroke();
+    }
+  } else if (active) {
+    g.fillStyle = `rgba(${color},0.8)`;
+    g.beginPath(); g.arc(sx + Math.cos(a) * hd, sy + Math.sin(a) * hd, 4, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
 function drawBullet(x, y, vx, vy, color, weapon) {
   gfx.drawBullet(g, x, y, vx, vy, color, weapon || weaponBySpeed(Math.hypot(vx, vy)));
 }
