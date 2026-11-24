@@ -120,6 +120,16 @@ const SOUNDS = {
   sonar: () => { tone({ freq: 1180, type: 'sine', dur: 0.9, vol: 0.12, attack: 0.01 }); tone({ freq: 1180, type: 'sine', dur: 0.7, vol: 0.04, at: 0.45, attack: 0.01 }); },
   sink: () => { tone({ freq: 220, to: 55, type: 'triangle', dur: 2.2, vol: 0.18 }); for (let i = 0; i < 8; i++) tone({ freq: 500 + Math.random() * 700, to: 900 + Math.random() * 600, type: 'sine', dur: 0.08, vol: 0.05, at: 0.4 + i * 0.18 }); },
   aim: () => tone({ freq: 1600, type: 'square', dur: 0.04, vol: 0.05 }),
+  // arena
+  shot: () => { noise({ dur: 0.07, vol: 0.16, from: 2600, to: 700, q: 0.8 }); tone({ freq: 340, to: 120, type: 'square', dur: 0.06, vol: 0.05 }); },
+  shotFar: () => noise({ dur: 0.06, vol: 0.06, from: 1800, to: 600, q: 0.8 }),
+  hitmark: () => tone({ freq: 1500, to: 1100, type: 'square', dur: 0.05, vol: 0.07 }),
+  hurt: () => { tone({ freq: 180, to: 90, type: 'sawtooth', dur: 0.14, vol: 0.12 }); noise({ dur: 0.1, vol: 0.15, from: 900, to: 300 }); },
+  kill: () => [880, 1320].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.14, vol: 0.18, at: i * 0.08 })),
+  die: () => { noise({ dur: 0.6, vol: 0.4, from: 800, to: 80, q: 0.6 }); tone({ freq: 200, to: 50, type: 'triangle', dur: 0.6, vol: 0.2 }); },
+  pickup: () => [660, 990, 1320].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.1, vol: 0.15, at: i * 0.05 })),
+  count: () => tone({ freq: 660, type: 'triangle', dur: 0.12, vol: 0.2 }),
+  go: () => tone({ freq: 990, to: 1320, type: 'triangle', dur: 0.3, vol: 0.22 }),
 };
 
 export function play(name) {
@@ -138,6 +148,8 @@ const PATTERNS = {
   win: [80, 40, 80, 40, 160],
   nope: [25],
   emoji: [10],
+  hurt: [35],
+  die: [160, 60, 80],
 };
 let iosSwitch = null;
 function iosTick() {

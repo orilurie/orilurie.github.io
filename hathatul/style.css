@@ -652,3 +652,5 @@ body:not(.bs-on) #bs-stage { display: none; }
 .im-votes th, .im-votes td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: start; }
 .im-votes td.plus { color: #1b7a2a; font-weight: 800; }
 .im-next { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+a.game-card { text-decoration: none; color: inherit; grid-column: 1 / -1; }
+a.game-card small { display: block; font-size: .7rem; opacity: .7; font-weight: 400; }
