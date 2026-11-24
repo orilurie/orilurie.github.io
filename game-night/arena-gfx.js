@@ -1,12 +1,12 @@
 // זירה – graphics: sprites and effects from Kenney's "Top-down Shooter" and "Particle Pack"
 // (both CC0, see arena-gfx/LICENSE-*), plus pseudo-3D walls and soft lighting.
 
-import { isRich } from './gfx-mode.js?v=48';
+import { isRich } from './gfx-mode.js?v=49';
 
 const BASE = 'arena-gfx/';
 const imgs = {};
 const load = n => {
-  if (!imgs[n]) { const i = new Image(); i.src = `${BASE}${n}.png`; imgs[n] = i; }
+  if (!imgs[n]) { const i = new Image(); i.src = `${BASE}${n}${n.includes('.') ? '' : '.png'}`; imgs[n] = i; }
   return imgs[n];
 };
 const ready = i => i && i.complete && i.naturalWidth > 0;
@@ -24,7 +24,7 @@ export const WALL_H = 16; // how tall walls look
 export function preload() {
   for (const c of [...CHARACTERS, 'robot1']) for (const p of new Set(Object.values(POSE))) load(`${c}_${p}`);
   for (const m of MAP_LOOK) { load(m.floor); load(m.wall); if (m.deco) load(m.deco); }
-  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01', 'spark_05', 'trace_07', 'trace_01', 'bulletSand1', 'bulletSand2', 'bulletDark3', 'barrelRed_top', 'crateWood', 'explosion1', 'explosion2', 'explosion3', 'explosion4', 'explosion5']) load(n);
+  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01', 'spark_05', 'trace_07', 'trace_01', 'bulletSand1', 'bulletSand2', 'bulletDark3', 'barrelRed_top', 'crateWood', 'explosion1', 'explosion2', 'explosion3', 'explosion4', 'explosion5', 'fl_bomb.webp', 'fl_rocket.webp', 'fl_boomerang.webp', 'trace_06']) load(n);
 }
 
 // white particle textures, tinted once per colour
@@ -262,35 +262,50 @@ const BULLET_LOOK = {
   sniper: { head: 'bulletDark3', hw: 4, hh: 18, trace: 'trace_01', len: 160, wid: 26 },
 };
 export function drawBullet(g, x, y, vx, vy, color, weapon) {
-  if (weapon === 'laser') { // a bright beam
-    const l = Math.hypot(vx, vy) || 1, tail = 70;
-    g.save();
-    if (isRich()) g.globalCompositeOperation = 'lighter';
-    g.lineCap = 'round';
-    g.strokeStyle = color; g.globalAlpha = 0.55; g.lineWidth = 9;
-    g.beginPath(); g.moveTo(x - (vx / l) * tail, y - (vy / l) * tail); g.lineTo(x, y); g.stroke();
-    g.strokeStyle = '#fff'; g.globalAlpha = 0.95; g.lineWidth = 3;
-    g.beginPath(); g.moveTo(x - (vx / l) * tail, y - (vy / l) * tail); g.lineTo(x, y); g.stroke();
-    g.restore();
+  if (weapon === 'laser') { // a glowing beam (Particle Pack streak), white-hot core
+    const a = Math.atan2(vy, vx), tr = isRich() ? tint('trace_06', color) : null;
+    if (tr) {
+      g.save(); g.translate(x, y); g.rotate(a + Math.PI / 2);
+      g.globalCompositeOperation = 'lighter';
+      g.drawImage(tr, -26, -8, 52, 140);
+      g.drawImage(tr, -26, -8, 52, 140);
+      g.drawImage(tint('trace_06', '#ffffff'), -9, -4, 18, 125);
+      g.restore();
+      drawGlow(g, x, y, 22, color, 0.9);
+    } else {
+      const l = Math.hypot(vx, vy) || 1;
+      g.strokeStyle = color; g.lineWidth = 5; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x - (vx / l) * 70, y - (vy / l) * 70); g.lineTo(x, y); g.stroke();
+    }
     return;
   }
-  if (weapon === 'boomerang') { // a spinning V
-    g.save(); g.translate(x, y); g.rotate(performance.now() / 50);
-    g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#a0632b';
-    g.beginPath(); g.moveTo(-13, -8); g.lineTo(0, 4); g.lineTo(13, -8); g.stroke();
-    g.lineWidth = 3; g.strokeStyle = color;
-    g.beginPath(); g.moveTo(-11, -7); g.lineTo(0, 3); g.lineTo(11, -7); g.stroke();
-    g.restore();
+  if (weapon === 'boomerang') { // Fluent 🪃, spinning
+    const i = load('fl_boomerang.webp');
+    if (isRich() && ready(i)) {
+      g.save(); g.translate(x, y); g.rotate(performance.now() / 45);
+      g.drawImage(i, -17, -17, 34, 34);
+      g.restore();
+    } else {
+      g.save(); g.translate(x, y); g.rotate(performance.now() / 50);
+      g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#a0632b';
+      g.beginPath(); g.moveTo(-13, -8); g.lineTo(0, 4); g.lineTo(13, -8); g.stroke();
+      g.restore();
+    }
     return;
   }
-  if (weapon === 'rocket') {
-    const a = Math.atan2(vy, vx);
-    drawGlow(g, x - Math.cos(a) * 14, y - Math.sin(a) * 14, 26, '#ff9a3c', 0.9); // exhaust
-    g.save(); g.translate(x, y); g.rotate(a);
-    g.fillStyle = '#5a6270'; g.fillRect(-14, -5, 22, 10);
-    g.fillStyle = '#e8453c'; g.beginPath(); g.moveTo(8, -5); g.lineTo(16, 0); g.lineTo(8, 5); g.fill();
-    g.fillStyle = '#3b414c'; g.fillRect(-16, -8, 5, 16);
-    g.restore();
+  if (weapon === 'rocket') { // Fluent 🚀 (drawn pointing up-right, so turned by +45°) with a flame
+    const a = Math.atan2(vy, vx), i = load('fl_rocket.webp');
+    drawGlow(g, x - Math.cos(a) * 18, y - Math.sin(a) * 18, 28, '#ff9a3c', 0.95);
+    if (isRich() && ready(i)) {
+      g.save(); g.translate(x, y); g.rotate(a + Math.PI / 4);
+      g.drawImage(i, -20, -20, 40, 40);
+      g.restore();
+    } else {
+      g.save(); g.translate(x, y); g.rotate(a);
+      g.fillStyle = '#5a6270'; g.fillRect(-14, -5, 22, 10);
+      g.fillStyle = '#e8453c'; g.beginPath(); g.moveTo(8, -5); g.lineTo(16, 0); g.lineTo(8, 5); g.fill();
+      g.restore();
+    }
     return;
   }
   if (!isRich()) {
@@ -367,15 +382,17 @@ export function drawGrenade(g, x, y, fuse, blastR, now) {
     g.strokeStyle = `rgba(255,70,70,${0.25 + (0.8 - fuse) * 0.6})`; g.lineWidth = 2; g.setLineDash([8, 8]);
     g.beginPath(); g.arc(x, y, blastR, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
   }
-  g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x + 3, y + 5, 9, 7, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#3c4a32'; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = '#1d2418'; g.lineWidth = 2; g.stroke();
-  const blink = Math.sin(now / (fuse < 0.6 ? 40 : 110)) > 0;
-  g.fillStyle = blink ? '#ff3b3b' : '#7a1f1f'; g.beginPath(); g.arc(x + 3, y - 3, 3, 0, Math.PI * 2); g.fill();
-  if (blink) drawGlow(g, x + 3, y - 3, 14, '#ff3b3b', 0.8);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x + 3, y + 7, 11, 8, 0, 0, Math.PI * 2); g.fill();
+  const i = load('fl_bomb.webp'), blink = Math.sin(now / (fuse < 0.6 ? 40 : 110)) > 0;
+  if (isRich() && ready(i)) {
+    g.drawImage(i, x - 15, y - 17, 30, 30); // Fluent 💣
+    if (blink) drawGlow(g, x + 10, y - 13, 16, '#ffb347', 1); // the fuse sparks
+  } else {
+    g.fillStyle = '#3c4a32'; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill();
+    g.fillStyle = blink ? '#ff3b3b' : '#7a1f1f'; g.beginPath(); g.arc(x + 3, y - 3, 3, 0, Math.PI * 2); g.fill();
+  }
 }
 
-// explosion: 5 frames over ~0.45 s, sized to the blast; returns false when done
 export function drawBoom(g, b, now) {
   const age = Math.max(0, (now - b.t0) / 450);
   if (age >= 1) return false;

@@ -1,8 +1,8 @@
 // רביעיות – screen, interactions and animations. Rendering is driven by app.js.
 
-import { RANK_NAMES, rankMany, MAX_PLAYERS } from './quartets.js?v=48';
-import { fly, burst } from './anim.js?v=48';
-import { play, haptic } from './sfx.js?v=48';
+import { RANK_NAMES, rankMany, MAX_PLAYERS } from './quartets.js?v=49';
+import { fly, burst } from './anim.js?v=49';
+import { play, haptic } from './sfx.js?v=49';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const red = suit => suit === '♥' || suit === '♦';
