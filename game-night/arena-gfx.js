@@ -1,7 +1,7 @@
 // זירה – graphics: sprites and effects from Kenney's "Top-down Shooter" and "Particle Pack"
 // (both CC0, see arena-gfx/LICENSE-*), plus pseudo-3D walls and soft lighting.
 
-import { isRich } from './gfx-mode.js?v=47';
+import { isRich } from './gfx-mode.js?v=48';
 
 const BASE = 'arena-gfx/';
 const imgs = {};
@@ -13,7 +13,7 @@ const ready = i => i && i.complete && i.naturalWidth > 0;
 
 // One character per seat (by colour order); bots are robots. The colour shows as a ring.
 export const CHARACTERS = ['hitman1', 'manBlue', 'womanGreen', 'manBrown', 'survivor1', 'soldier1'];
-const POSE = { pistol: 'gun', smg: 'machine', shotgun: 'silencer', sniper: 'silencer' };
+const POSE = { pistol: 'gun', smg: 'machine', shotgun: 'silencer', sniper: 'silencer', rocket: 'silencer', laser: 'machine', boomerang: 'hold' };
 const MAP_LOOK = [
   { floor: 'tile_01', wall: 'tile_69', front: '#7a3b1c', tint: 'rgba(40,70,30,0.10)', deco: 'tile_213' }, // מבצר: grass, bricks
   { floor: 'tile_05', wall: 'tile_96', front: '#8a6a45', tint: 'rgba(80,50,20,0.10)' }, // עמודים: dirt, sand bricks
@@ -24,7 +24,7 @@ export const WALL_H = 16; // how tall walls look
 export function preload() {
   for (const c of [...CHARACTERS, 'robot1']) for (const p of new Set(Object.values(POSE))) load(`${c}_${p}`);
   for (const m of MAP_LOOK) { load(m.floor); load(m.wall); if (m.deco) load(m.deco); }
-  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01', 'spark_05', 'trace_07', 'trace_01', 'bulletSand1', 'bulletSand2', 'bulletDark3']) load(n);
+  for (const n of ['tile_183', 'muzzle_02', 'smoke_04', 'light_02', 'circle_05', 'scorch_01', 'dirt_01', 'spark_05', 'trace_07', 'trace_01', 'bulletSand1', 'bulletSand2', 'bulletDark3', 'barrelRed_top', 'crateWood', 'explosion1', 'explosion2', 'explosion3', 'explosion4', 'explosion5']) load(n);
 }
 
 // white particle textures, tinted once per colour
@@ -262,6 +262,37 @@ const BULLET_LOOK = {
   sniper: { head: 'bulletDark3', hw: 4, hh: 18, trace: 'trace_01', len: 160, wid: 26 },
 };
 export function drawBullet(g, x, y, vx, vy, color, weapon) {
+  if (weapon === 'laser') { // a bright beam
+    const l = Math.hypot(vx, vy) || 1, tail = 70;
+    g.save();
+    if (isRich()) g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    g.strokeStyle = color; g.globalAlpha = 0.55; g.lineWidth = 9;
+    g.beginPath(); g.moveTo(x - (vx / l) * tail, y - (vy / l) * tail); g.lineTo(x, y); g.stroke();
+    g.strokeStyle = '#fff'; g.globalAlpha = 0.95; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(x - (vx / l) * tail, y - (vy / l) * tail); g.lineTo(x, y); g.stroke();
+    g.restore();
+    return;
+  }
+  if (weapon === 'boomerang') { // a spinning V
+    g.save(); g.translate(x, y); g.rotate(performance.now() / 50);
+    g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#a0632b';
+    g.beginPath(); g.moveTo(-13, -8); g.lineTo(0, 4); g.lineTo(13, -8); g.stroke();
+    g.lineWidth = 3; g.strokeStyle = color;
+    g.beginPath(); g.moveTo(-11, -7); g.lineTo(0, 3); g.lineTo(11, -7); g.stroke();
+    g.restore();
+    return;
+  }
+  if (weapon === 'rocket') {
+    const a = Math.atan2(vy, vx);
+    drawGlow(g, x - Math.cos(a) * 14, y - Math.sin(a) * 14, 26, '#ff9a3c', 0.9); // exhaust
+    g.save(); g.translate(x, y); g.rotate(a);
+    g.fillStyle = '#5a6270'; g.fillRect(-14, -5, 22, 10);
+    g.fillStyle = '#e8453c'; g.beginPath(); g.moveTo(8, -5); g.lineTo(16, 0); g.lineTo(8, 5); g.fill();
+    g.fillStyle = '#3b414c'; g.fillRect(-16, -8, 5, 16);
+    g.restore();
+    return;
+  }
   if (!isRich()) {
     const l = Math.hypot(vx, vy) || 1;
     g.strokeStyle = color; g.globalAlpha = 0.45; g.lineWidth = 4;
@@ -316,5 +347,45 @@ function drawBlob(g, o, color) {
     g.fillStyle = '#111'; g.beginPath(); g.arc(o.x + ex * 0.8 + ox, o.y + ey * 0.8 + oy, 2.2, 0, Math.PI * 2); g.fill();
   }
   if (o.flash > 0) { g.fillStyle = `rgba(255,255,255,${o.flash})`; g.beginPath(); g.arc(o.x, o.y, R, 0, Math.PI * 2); g.fill(); }
+  return true;
+}
+
+// crates and barrels (a little wobble when hit)
+export function drawProp(g, type, x, y, size, wob) {
+  const i = load(type === 'barrel' ? 'barrelRed_top' : 'crateWood');
+  g.fillStyle = 'rgba(0,0,0,0.3)';
+  g.beginPath(); g.ellipse(x + 5, y + 7, size * 0.55, size * 0.45, 0, 0, Math.PI * 2); g.fill();
+  g.save(); g.translate(x, y); g.rotate(Math.sin(performance.now() / 25) * 0.12 * wob);
+  if (isRich() && ready(i)) { g.imageSmoothingEnabled = false; g.drawImage(i, -size / 2, -size / 2, size, size); g.imageSmoothingEnabled = true; }
+  else if (type === 'barrel') { g.fillStyle = '#c0392b'; g.beginPath(); g.arc(0, 0, size / 2, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#7a1f16'; g.lineWidth = 3; g.stroke(); }
+  else { g.fillStyle = '#9b6a35'; g.fillRect(-size / 2, -size / 2, size, size); g.strokeStyle = '#5e3c1a'; g.lineWidth = 3; g.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4); }
+  g.restore();
+}
+
+export function drawGrenade(g, x, y, fuse, blastR, now) {
+  if (fuse < 0.8) { // warn where it will hit
+    g.strokeStyle = `rgba(255,70,70,${0.25 + (0.8 - fuse) * 0.6})`; g.lineWidth = 2; g.setLineDash([8, 8]);
+    g.beginPath(); g.arc(x, y, blastR, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+  }
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x + 3, y + 5, 9, 7, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#3c4a32'; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#1d2418'; g.lineWidth = 2; g.stroke();
+  const blink = Math.sin(now / (fuse < 0.6 ? 40 : 110)) > 0;
+  g.fillStyle = blink ? '#ff3b3b' : '#7a1f1f'; g.beginPath(); g.arc(x + 3, y - 3, 3, 0, Math.PI * 2); g.fill();
+  if (blink) drawGlow(g, x + 3, y - 3, 14, '#ff3b3b', 0.8);
+}
+
+// explosion: 5 frames over ~0.45 s, sized to the blast; returns false when done
+export function drawBoom(g, b, now) {
+  const age = Math.max(0, (now - b.t0) / 450);
+  if (age >= 1) return false;
+  const size = b.r * 1.7;
+  if (isRich()) {
+    const i = load(`explosion${Math.max(1, Math.min(5, 1 + Math.floor(age * 5)))}`);
+    if (ready(i)) { g.save(); g.globalAlpha = 1 - age * 0.4; g.drawImage(i, b.x - size / 2, b.y - size / 2, size, size); g.restore(); }
+  } else {
+    g.fillStyle = `rgba(255,170,60,${0.7 * (1 - age)})`;
+    g.beginPath(); g.arc(b.x, b.y, b.r * (0.4 + age * 0.6), 0, Math.PI * 2); g.fill();
+  }
   return true;
 }

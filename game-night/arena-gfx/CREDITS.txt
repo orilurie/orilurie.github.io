@@ -1,4 +1,4 @@
 Graphics used by the arena game (זירה). All CC0 (public domain), by Kenney (www.kenney.nl):
 - characters, floor/wall tiles, bushes: "Topdown Shooter" pack
-- bullets: "Top-down Tanks Remastered" pack
+- bullets, barrels, crates, explosions: "Top-down Tanks Remastered" pack
 - muzzle flash, tracers, smoke, light, glow, scorch, dust: "Particle Pack" (resized to 128 px)

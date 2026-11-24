@@ -5,7 +5,7 @@
 import {
   W, H, R, SPEED, BULLET_R, FIRE_CD, DMG, MAX_HP, TICK, MAX_PLAYERS, DM_TIME, RESPAWN, SPAWN_SHIELD,
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
-  canSee, STEP, NEAR, INTERP_MS, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
+  canSee, STEP, NEAR, INTERP_MS, GRENADE, PROPS, propRect, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
 } from '../../game-night/arena-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
@@ -87,7 +87,8 @@ const BOT_LEVELS = {
   normal: { err: 0.11, errD: 0.00026, lead: 1.1, react: 0.6, turn: 0.22, extraCd: 0, range: 1, view: 1, hear: 480, dash: 0.3, strafe: true, speed: 1, mem: 5 },
   hard: { err: 0.035, errD: 0.0001, lead: 0.35, leadMin: 0.75, react: 0.3, turn: 0.4, extraCd: 0, range: 1, view: 1, hear: 560, dash: 0.45, strafe: true, speed: 1, mem: 6 },
 };
-const PICKUP_TYPES = ['heal', 'heal', 'shield', 'triple', 'speed', 'smg', 'shotgun', 'sniper', 'smg', 'shotgun'];
+const PICKUP_TYPES = ['heal', 'heal', 'shield', 'triple', 'speed', 'smg', 'shotgun', 'sniper', 'rocket', 'laser', 'boomerang', 'nades', 'nades'];
+const TEAM_COLORS = ['#ff5d5d', '#4da3ff'];
 
 export class Room {
   constructor(state, env) {
@@ -115,7 +116,10 @@ export class Room {
     this.lastReport = 0;
   }
 
-  get walls() { return MAPS[this.map].walls; }
+  get walls() { return this.wallCache || MAPS[this.map].walls; }
+  // the map's walls plus every crate and barrel that is still standing
+  rebuildWalls() { this.wallCache = [...MAPS[this.map].walls, ...(this.props || []).filter(q => q.alive).map(q => q.rect)]; }
+  enemies(a, b) { return a !== b && !(this.mode === 'team' && a.team === b.team); }
   humans() { return [...this.players.values()].filter(p => !p.bot); }
   participants() { return [...this.players.values()].filter(p => p.inRound); }
 
@@ -194,12 +198,13 @@ export class Room {
         // prediction and the server agree (the classic client-prediction model).
         p.input = { ...p.input, a: Number(msg.a) || 0, f: !!msg.f };
         if (Number.isFinite(msg.r)) p.rtt = Math.max(0, Math.min(400, msg.r)); // client's measured round trip, ms
+        if (Number.isFinite(msg.g) && msg.g !== p.nadeSeen) { if (p.nadeSeen !== undefined) p.wantNade = true; p.nadeSeen = msg.g; }
         if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) this.applyCmd(p, c);
         return;
       }
       case 'cfg': {
         if (id !== this.host || (this.phase !== 'lobby' && this.phase !== 'end')) return;
-        if (msg.mode === 'dm' || msg.mode === 'lms') this.mode = msg.mode;
+        if (msg.mode === 'dm' || msg.mode === 'lms' || msg.mode === 'team') this.mode = msg.mode;
         if (Number.isInteger(msg.map) && msg.map >= -1 && msg.map < MAPS.length) this.mapPick = msg.map;
         if (Number.isInteger(msg.bots)) this.setBots(msg.bots);
         if (BOT_LEVELS[msg.botLevel]) this.botLevel = msg.botLevel;
@@ -322,6 +327,13 @@ export class Room {
       if (!insideWall(x, y, MAPS[this.map].walls, 60)) { zx = x; zy = y; break; }
     }
     this.zone = { x: zx, y: zy, r: Math.hypot(W, H) / 2 + 40 };
+    this.props = (MAPS[this.map].props || []).map((pr, i) => ({ id: i, type: pr[0], x: pr[1], y: pr[2], rect: propRect(pr), hp: PROPS[pr[0]].hp, alive: true, respawnAt: 0 }));
+    this.grenades = [];
+    this.rebuildWalls();
+    // teams: people spread evenly first, then bots fill in
+    const ps = [...this.players.values()].filter(p => !p.spectator);
+    const order = [...ps.filter(p => !p.bot).sort(() => Math.random() - 0.5), ...ps.filter(p => p.bot)];
+    order.forEach((p, i) => { p.team = this.mode === 'team' ? i % 2 : null; });
     for (const p of this.players.values()) {
       if (p.spectator) continue;
       Object.assign(p, { kills: 0, deaths: 0, inRound: true, place: 0, buffs: { triple: 0, speed: 0 }, input: { mx: 0, my: 0, a: p.input.a, f: false } });
@@ -339,7 +351,7 @@ export class Room {
   }
 
   spawn(p) {
-    const others = [...this.players.values()].filter(o => o !== p && o.alive);
+    const others = [...this.players.values()].filter(o => o.alive && this.enemies(o, p));
     let best = null, bestD = -1;
     for (let i = 0; i < 30; i++) {
       const x = 60 + Math.random() * (W - 120), y = 60 + Math.random() * (H - 120);
@@ -349,7 +361,7 @@ export class Room {
       if (d > bestD) { bestD = d; best = { x, y }; }
     }
     best ||= { x: W / 2, y: 80 };
-    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 }, vx: 0, vy: 0, weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, streak: 0, wantDash: false });
+    Object.assign(p, best, { hp: MAX_HP, shield: 0, alive: true, protect: this.t + SPAWN_SHIELD, cd: 0.4, buffs: { triple: 0, speed: 0 }, vx: 0, vy: 0, weapon: 'pistol', ammo: Infinity, dashT: 0, dashCd: 0, streak: 0, wantDash: false, nades: GRENADE.start, nadeCd: 0, wantNade: false });
     collide(p, this.walls);
     this.emit({ k: 'spawn', id: p.id });
   }
@@ -363,12 +375,17 @@ export class Room {
       const order = [...ps.filter(p => p.alive), ...this.deadOrder.slice().reverse().map(id => this.players.get(id)).filter(Boolean)];
       order.forEach((p, i) => { p.place = i + 1; });
       ps.forEach(p => { if (!p.place) p.place = order.length + 1; });
+    } else if (this.mode === 'team') {
+      const score = this.teamScores();
+      const win = score[0] === score[1] ? -1 : score[0] > score[1] ? 0 : 1;
+      ps.forEach(p => { p.place = win === -1 || p.team === win ? 1 : 2; });
+      this.winTeam = win;
     } else {
       const sorted = ps.slice().sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
       sorted.forEach((p, i) => { p.place = i > 0 && sorted[i - 1].kills === p.kills && sorted[i - 1].deaths === p.deaths ? sorted[i - 1].place : i + 1; });
     }
-    this.results = ps.map(p => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, place: p.place, bot: p.bot }))
-      .sort((a, b) => a.place - b.place);
+    this.results = ps.map(p => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, place: p.place, bot: p.bot, team: p.team }))
+      .sort((a, b) => a.place - b.place || b.kills - a.kills);
     this.bullets = [];
     this.autoNext = Date.now() + 15000; // next round starts by itself (the host can stop it)
     this.emit({ k: 'end' });
@@ -406,7 +423,7 @@ export class Room {
     for (const p of this.players.values()) {
       if (!p.inRound) continue;
       if (!p.alive) {
-        if (this.mode === 'dm' && playing && p.respawnAt && this.t >= p.respawnAt && (p.on || p.bot)) this.spawn(p);
+        if (this.mode !== 'lms' && playing && p.respawnAt && this.t >= p.respawnAt && (p.on || p.bot)) this.spawn(p);
         continue;
       }
       if (p.bot) this.botThink(p);
@@ -446,6 +463,17 @@ export class Room {
           if (o.bot && o.alive && o !== p && Math.hypot(o.x - p.x, o.y - p.y) < BOT_LEVELS[this.botLevel].hear * 1.6) o.ai.heard = { x: p.x, y: p.y, t: this.t };
         }
       }
+      // grenade
+      p.nadeCd -= TICK;
+      if (p.wantNade) {
+        p.wantNade = false;
+        if (p.nades > 0 && p.nadeCd <= 0) {
+          p.nades--; p.nadeCd = GRENADE.cd;
+          const a = p.aim, d = R + 10;
+          this.grenades.push({ id: ++this.seq, owner: p.id, x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d, vx: Math.cos(a) * GRENADE.speed, vy: Math.sin(a) * GRENADE.speed, fuse: GRENADE.fuse });
+          this.emit({ k: 'throw', id: p.id, x: r1(p.x), y: r1(p.y) });
+        }
+      }
       // pickups
       for (let i = this.pickups.length - 1; i >= 0; i--) {
         const u = this.pickups[i];
@@ -453,6 +481,7 @@ export class Room {
         if (u.type === 'heal' && p.hp >= MAX_HP) continue;
         if (u.type === 'heal') p.hp = Math.min(MAX_HP, p.hp + 40);
         else if (u.type === 'shield') p.shield = 50;
+        else if (u.type === 'nades') { if (p.nades >= GRENADE.max) continue; p.nades = Math.min(GRENADE.max, p.nades + 2); }
         else if (WEAPONS[u.type]) { p.weapon = u.type; p.ammo = WEAPONS[u.type].ammo; }
         else p.buffs[u.type] = this.t + BUFF_TIME[u.type];
         this.pickups.splice(i, 1);
@@ -469,42 +498,138 @@ export class Room {
     if (playing) {
       const live = [];
       for (const b of this.bullets) {
+        const w = WEAPONS[b.w] || WEAPONS.pistol;
+        // boomerang: after half its flight (or a wall) it turns back toward its thrower
+        if (w.returns) {
+          const owner = this.players.get(b.owner);
+          if (!b.back && b.life < w.life * 0.5) b.back = true;
+          if (b.back) {
+            if (!owner?.alive) { continue; }
+            const dx = owner.x - b.x, dy = owner.y - b.y, d = Math.hypot(dx, dy);
+            if (d < R + 8) continue; // caught
+            b.vx = (dx / d) * w.speed; b.vy = (dy / d) * w.speed;
+            b.life = Math.max(b.life, 0.2);
+            if ((b.backT = (b.backT || 0) + TICK) > 2.5) continue;
+          }
+        }
         let alive = stepBullet(b, TICK, walls);
+        if (!alive) {
+          const prop = this.propAt(b.x, b.y) || this.propAt((b.px + b.x) / 2, (b.py + b.y) / 2);
+          if (prop) this.hitProp(prop, b.dmg || DMG, b.owner);
+          if (w.returns && !b.back && b.life > 0) { b.back = true; b.x = b.px; b.y = b.py; alive = true; } // bounces home
+          else if (w.blast) this.explode(b.px, b.py, w.blast.r, w.blast.dmg, b.owner, 'rocket');
+        }
         if (alive) {
           for (const p of this.players.values()) {
             if (!p.alive || p.id === b.owner) continue;
+            const shooter = this.players.get(b.owner);
+            if (shooter && !this.enemies(shooter, p)) continue; // no friendly fire
+            if (b.hitIds?.includes(p.id)) continue;
             // lag compensation: test against where the target was on the shooter's screen
             const [tx, ty] = b.lag ? this.posAt(p, this.t - b.lag) : [p.x, p.y];
             if (segDist(b.px, b.py, b.x, b.y, tx, ty) > R + BULLET_R) continue;
-            alive = false;
-            if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); break; }
+            if (w.pierce) (b.hitIds ||= []).push(p.id); else alive = false;
+            if (this.t < p.protect) { this.emit({ k: 'block', x: r1(b.x), y: r1(b.y) }); if (!w.pierce) break; continue; }
             this.emit({ k: 'hit', v: p.id, by: b.owner, x: r1(b.x), y: r1(b.y), dmg: b.dmg || DMG });
             if (p.bot) {
               const L = BOT_LEVELS[this.botLevel];
               if (L.hear || Math.random() < 0.4) p.ai.heard = { x: b.x - b.vx * 0.5, y: b.y - b.vy * 0.5, t: this.t, hit: true };
               if (p.dashCd <= 0 && Math.random() < L.dash) p.wantDash = true;
             }
-            const sp = Math.hypot(b.vx, b.vy) || 1, push = WEAPONS[b.w]?.push || 8;
+            const sp = Math.hypot(b.vx, b.vy) || 1, push = w.push || 8;
             p.x += (b.vx / sp) * push; p.y += (b.vy / sp) * push;
             collide(p, walls);
             this.damage(p, b.dmg || DMG, b.owner);
-            break;
+            if (w.blast) this.explode(b.x, b.y, w.blast.r, w.blast.dmg, b.owner, 'rocket', p.id);
+            if (!w.pierce) break;
           }
         }
         if (alive) live.push(b);
       }
       this.bullets = live;
+      this.stepGrenades();
+      // crates and barrels come back after a while (not on top of someone)
+      for (const q of this.props) {
+        if (q.alive || this.t < q.respawnAt) continue;
+        if ([...this.players.values()].some(o => o.alive && Math.hypot(o.x - q.x, o.y - q.y) < 50)) continue;
+        q.alive = true; q.hp = PROPS[q.type].hp;
+        this.rebuildWalls();
+        this.emit({ k: 'prop', id: q.id });
+      }
 
       if (this.t >= this.nextPickup) {
         this.nextPickup = this.t + 5;
         if (this.pickups.length < 5) this.spawnPickup();
       }
 
-      if (this.mode === 'dm' && this.t >= this.endAt) this.endRound();
+      if (this.mode !== 'lms' && this.t >= this.endAt) this.endRound();
       else if (this.mode === 'lms' && this.participants().filter(p => p.alive).length <= 1) this.endRound();
     }
 
     if (this.phase !== 'end') this.sendSnapshot(); // 30 updates a second
+  }
+
+  propAt(x, y) {
+    return (this.props || []).find(q => q.alive && x > q.rect[0] - 2 && x < q.rect[0] + q.rect[2] + 2 && y > q.rect[1] - 2 && y < q.rect[1] + q.rect[3] + 2);
+  }
+
+  hitProp(q, dmg, by) {
+    if (!q.alive) return;
+    q.hp -= dmg;
+    if (q.hp > 0) { this.emit({ k: 'phit', id: q.id }); return; }
+    q.alive = false;
+    q.respawnAt = this.t + PROPS[q.type].respawn;
+    this.rebuildWalls();
+    this.emit({ k: 'break', id: q.id, type: q.type, x: q.x, y: q.y });
+    if (q.type === 'barrel') this.explode(q.x, q.y, PROPS.barrel.blast.r, PROPS.barrel.blast.dmg, by, 'barrel');
+    else if (Math.random() < 0.35) { // a crate sometimes has something inside
+      const type = PICKUP_TYPES[Math.floor(Math.random() * PICKUP_TYPES.length)];
+      this.pickups.push({ id: ++this.seq, type, x: q.x, y: q.y });
+    }
+  }
+
+  // An explosion: damage falls off with distance, walls shield you, it pushes people away and
+  // sets off barrels and breaks crates nearby. Your own blasts hurt you at half strength.
+  explode(x, y, r, dmg, by, kind, skipId = null) {
+    this.emit({ k: 'boom', x: r1(x), y: r1(y), r, kind });
+    const shooter = this.players.get(by);
+    for (const p of this.players.values()) {
+      if (!p.alive || p.id === skipId) continue;
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d > r + R) continue;
+      if (shooter && p !== shooter && !this.enemies(shooter, p)) continue;
+      if (blocked(x, y, p.x, p.y, this.walls)) continue;
+      const f = 1 - 0.6 * Math.min(1, d / r);
+      if (d > 1) { const push = 45 * f; p.x += ((p.x - x) / d) * push; p.y += ((p.y - y) / d) * push; collide(p, this.walls); }
+      if (this.t < p.protect) continue;
+      this.emit({ k: 'hit', v: p.id, by, x: r1(p.x), y: r1(p.y), dmg: Math.round(dmg * f * (p === shooter ? 0.5 : 1)) });
+      this.damage(p, Math.round(dmg * f * (p === shooter ? 0.5 : 1)), by);
+    }
+    for (const q of this.props || []) if (q.alive && Math.hypot(q.x - x, q.y - y) < r) this.hitProp(q, dmg, by);
+    for (const o of this.players.values()) {
+      if (o.bot && o.alive && Math.hypot(o.x - x, o.y - y) < 900) o.ai.heard = { x, y, t: this.t };
+    }
+  }
+
+  stepGrenades() {
+    const walls = this.walls, keep = [];
+    for (const g of this.grenades) {
+      const f = Math.pow(0.32, TICK); // they roll to a stop in about a second
+      g.vx *= f; g.vy *= f;
+      const nx = g.x + g.vx * TICK, ny = g.y + g.vy * TICK;
+      if (insideWall(nx, g.y, walls, 6) || nx < 6 || nx > W - 6) g.vx = -g.vx * 0.6; else g.x = nx;
+      if (insideWall(g.x, ny, walls, 6) || ny < 6 || ny > H - 6) g.vy = -g.vy * 0.6; else g.y = ny;
+      g.fuse -= TICK;
+      if (g.fuse <= 0) this.explode(g.x, g.y, GRENADE.r, GRENADE.dmg, g.owner, 'nade');
+      else keep.push(g);
+    }
+    this.grenades = keep;
+  }
+
+  teamScores() {
+    const s = [0, 0];
+    for (const p of this.players.values()) if (p.inRound && p.team != null) s[p.team] += p.kills;
+    return s;
   }
 
   damage(p, amount, by, zone = false) {
@@ -520,7 +645,7 @@ export class Room {
     p.alive = false;
     p.deaths++;
     p.respawnAt = this.t + RESPAWN;
-    const killer = by && by !== p.id ? this.players.get(by) : null;
+    const killer = by && by !== p.id && this.enemies(this.players.get(by) || {}, p) ? this.players.get(by) : null;
     const ended = p.streak;
     p.streak = 0;
     if (killer) {
@@ -633,7 +758,7 @@ export class Room {
     const ai = p.ai, walls = this.walls, L = BOT_LEVELS[this.botLevel];
     let target = null, td = Infinity;
     for (const real of this.players.values()) {
-      if (!real.alive || real === p) continue;
+      if (!real.alive || !this.enemies(p, real)) continue;
       // bots see people with the same delay people see bots (ping + display smoothing)
       const o = this.perceived(real);
       if (!this.visible(p, o)) continue;
@@ -642,6 +767,12 @@ export class Room {
       if (d < td) { td = d; target = o; }
     }
     if (target) { ai.mem = { x: target.x, y: target.y, t: this.t }; ai.seen += TICK; } else ai.seen = 0;
+    // throw a grenade at someone hiding nearby, now and then (not the weakest bots)
+    if (this.botLevel !== 'vez' && p.nades > 0 && p.nadeCd <= 0 && Math.random() < (this.botLevel === 'hard' ? 0.02 : 0.008)) {
+      const m = target || (ai.mem && this.t - ai.mem.t < 1.5 ? ai.mem : null);
+      const d = m ? Math.hypot(m.x - p.x, m.y - p.y) : 1e9;
+      if (d > 140 && d < 360) { p.input.a = Math.atan2(m.y - p.y, m.x - p.x); p.wantNade = true; }
+    }
     const dist = td;
 
     // where to go
@@ -810,7 +941,7 @@ export class Room {
     }
     const base = {
       t: 's', n: this.tickNo, ph: this.phase,
-      tl: this.phase === 'count' ? r1(this.countEnd - this.t) : this.mode === 'dm' ? r1(Math.max(0, this.endAt - this.t)) : r1(Math.max(0, this.countEnd + this.zoneDur - this.t)),
+      tl: this.phase === 'count' ? r1(this.countEnd - this.t) : this.mode !== 'lms' ? r1(Math.max(0, this.endAt - this.t)) : r1(Math.max(0, this.countEnd + this.zoneDur - this.t)),
       z: this.mode === 'lms' && this.zone ? [r1(this.zone.x), r1(this.zone.y), r1(this.zone.r)] : null,
       ack,
       u: this.pickups.map(u => [u.id, u.type, r1(u.x), r1(u.y)]),
@@ -823,20 +954,22 @@ export class Room {
       const visible = new Set();
       const rows = [];
       for (const { p, row } of all) {
-        if (p === v || !p.alive || seesAll || this.visible(v, p)) { rows.push(row); if (p.alive) visible.add(p.id); }
+        if (p === v || !p.alive || seesAll || this.visible(v, p) || (this.mode === 'team' && v && p.team === v.team)) { rows.push(row); if (p.alive) visible.add(p.id); }
         else rows.push([p.id, 0, 0, 0, 0, 2, 0, 0, 0]); // alive but hidden (alive = 2, keeps counts right)
       }
       const near = (x, y, d) => seesAll || Math.hypot(x - v.x, y - v.y) < d;
       const ev = this.events.filter(e => {
-        if (['kill', 'start', 'go', 'end', 'spawn', 'multi', 'streak', 'stop'].includes(e.k)) return true;
+        if (['kill', 'start', 'go', 'end', 'spawn', 'multi', 'streak', 'stop', 'boom', 'break', 'prop'].includes(e.k)) return true;
         if (e.v === v?.id || e.by === v?.id || e.id === v?.id) return true;
         if (e.k === 'shot') return near(e.x, e.y, 900);
         return e.x === undefined || sees(e.x, e.y);
       }).map(e => (e.k === 'kill' && e.x !== undefined && !sees(e.x, e.y) && e.a !== v?.id && e.v !== v?.id ? { k: e.k, a: e.a, v: e.v } : e));
       const msg = {
         ...base, p: rows, ev,
-        me: v && v.inRound ? { w: WEAPON_LIST.indexOf(v.weapon), am: Number.isFinite(v.ammo) ? v.ammo : -1, dc: r1(Math.max(0, v.dashCd)), st: v.streak } : null,
-        b: this.bullets.filter(b => b.owner === v?.id || sees(b.x, b.y)).map(b => [b.id, r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.owner]),
+        me: v && v.inRound ? { w: WEAPON_LIST.indexOf(v.weapon), am: Number.isFinite(v.ammo) ? v.ammo : -1, dc: r1(Math.max(0, v.dashCd)), st: v.streak, nd: v.nades || 0 } : null,
+        b: this.bullets.filter(b => b.owner === v?.id || sees(b.x, b.y)).map(b => [b.id, r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.owner, WEAPON_LIST.indexOf(b.w)]),
+        gr: this.grenades.map(g => [g.id, r1(g.x), r1(g.y), r1(g.fuse)]),
+        pr: (this.props || []).map(q => (q.alive ? 1 : 0)),
         fs: seesAll ? [] : this.steps.filter(st => st[4] !== v.id && !visible.has(st[4]) && near(st[0], st[1], 1100)).map(st => st.slice(0, 4)),
       };
       try { ws.send(JSON.stringify(msg)); } catch {}
@@ -848,7 +981,8 @@ export class Room {
     this.broadcast({
       t: 'room', code: this.code, pub: this.pub, host: this.host, phase: this.phase, mode: this.mode,
       mapPick: this.mapPick, map: this.map, bots: this.botCount, botLevel: this.botLevel,
-      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.bot, on: p.on, k: p.kills, d: p.deaths, inRound: p.inRound, lvl: p.bot ? 0 : p.lvl })),
+      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.bot, on: p.on, k: p.kills, d: p.deaths, inRound: p.inRound, lvl: p.bot ? 0 : p.lvl, team: p.team ?? null })),
+      teamScore: this.mode === 'team' ? this.teamScores() : null, winTeam: this.phase === 'end' ? this.winTeam ?? null : null,
       next: this.phase === 'end' && this.autoNext ? Math.max(0, Math.round((this.autoNext - Date.now()) / 1000)) : null,
       results: this.results,
     });

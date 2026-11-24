@@ -25,6 +25,10 @@ export const PICKUPS = {
   smg: { icon: '🔥', name: 'תת־מקלע', weapon: true },
   shotgun: { icon: '💥', name: 'רובה ציד', weapon: true },
   sniper: { icon: '🎯', name: 'רובה צלפים', weapon: true },
+  rocket: { icon: '🚀', name: 'משגר רקטות', weapon: true },
+  laser: { icon: '⚡', name: 'לייזר', weapon: true },
+  boomerang: { icon: '🪃', name: 'בומרנג', weapon: true },
+  nades: { icon: '💣', name: 'רימונים' },
 };
 
 // Weapons: you always have the pistol; a weapon pickup replaces it until its ammo runs out.
@@ -34,7 +38,22 @@ export const WEAPONS = {
   smg: { name: 'תת־מקלע', icon: '🔥', cd: 0.12, dmg: 11, speed: 820, life: 0.6, pellets: 1, spread: 0, jitter: 0.08, ammo: 45, kick: 1.5, push: 4 },
   shotgun: { name: 'רובה ציד', icon: '💥', cd: 0.85, dmg: 13, speed: 700, life: 0.34, pellets: 6, spread: 0.45, jitter: 0, ammo: 8, kick: 7, push: 14 },
   sniper: { name: 'רובה צלפים', icon: '🎯', cd: 1.25, dmg: 70, speed: 1500, life: 0.75, pellets: 1, spread: 0, jitter: 0, ammo: 5, kick: 8, push: 30 },
+  // explodes where it lands (blast below), slow but deadly
+  rocket: { name: 'משגר רקטות', icon: '🚀', cd: 1.1, dmg: 25, speed: 520, life: 1.6, pellets: 1, spread: 0, jitter: 0, ammo: 4, kick: 10, push: 20, blast: { r: 95, dmg: 55 } },
+  // a fast beam that goes through people (not walls)
+  laser: { name: 'לייזר', icon: '⚡', cd: 0.85, dmg: 34, speed: 2400, life: 0.33, pellets: 1, spread: 0, jitter: 0, ammo: 6, kick: 4, push: 6, pierce: true },
+  // flies out, turns back to you, hits everyone on the way (both ways)
+  boomerang: { name: 'בומרנג', icon: '🪃', cd: 0.6, dmg: 28, speed: 620, life: 1.4, pellets: 1, spread: 0, jitter: 0, ammo: 10, kick: 3, push: 10, pierce: true, returns: true },
 };
+// Grenades: thrown with their own button, bounce off walls, explode after the fuse.
+export const GRENADE = { speed: 520, fuse: 1.6, r: 115, dmg: 70, max: 3, start: 1, cd: 0.6 };
+// Barrels (explode when shot) and crates (break, sometimes leaving a bonus). Both block
+// movement, bullets and sight while they stand, and come back after a while.
+export const PROPS = {
+  barrel: { size: 34, hp: 30, blast: { r: 125, dmg: 75 }, respawn: 25 },
+  crate: { size: 46, hp: 60, respawn: 35 },
+};
+export const propRect = ([type, x, y]) => { const s = PROPS[type].size; return [x - s / 2, y - s / 2, s, s]; };
 export const WEAPON_LIST = Object.keys(WEAPONS); // index sent over the wire
 export const DASH = { time: 0.16, speed: 3.4, cd: 3 }; // a quick dodge
 export const BUSH_REVEAL = 90; // in a bush you're hidden unless someone is this close (or you just fired)
@@ -58,10 +77,14 @@ export const MAPS = [
       [780, 110, 40, 180], [780, 710, 40, 180], [120, 480, 160, 40], [1320, 480, 160, 40],
     ],
     bushes: [[560, 500, 56], [1040, 500, 56], [180, 150, 52], [1420, 850, 52], [180, 850, 52], [1420, 150, 52]],
+    props: [['barrel', 640, 300], ['barrel', 960, 700], ['barrel', 450, 650], ['barrel', 1150, 350],
+      ['crate', 700, 640], ['crate', 900, 360], ['crate', 400, 500], ['crate', 1200, 500]],
   },
   {
     name: 'עמודים', walls: pillars(),
     bushes: [[550, 250, 52], [1050, 750, 52], [300, 500, 50], [1300, 500, 50], [550, 750, 46], [1050, 250, 46]],
+    props: [['barrel', 675, 375], ['barrel', 925, 625], ['barrel', 425, 625], ['barrel', 1175, 375],
+      ['crate', 675, 625], ['crate', 925, 375], ['crate', 150, 250], ['crate', 1450, 750]],
   },
   {
     name: 'מסדרונות',
@@ -70,6 +93,8 @@ export const MAPS = [
       [782, 120, 36, 230], [782, 650, 36, 230], [500, 470, 36, 60], [1064, 470, 36, 60],
     ],
     bushes: [[300, 180, 52], [1300, 820, 52], [300, 820, 52], [1300, 180, 52], [800, 500, 58]],
+    props: [['barrel', 650, 500], ['barrel', 950, 500], ['barrel', 700, 200], ['barrel', 900, 800],
+      ['crate', 400, 240], ['crate', 1200, 760], ['crate', 400, 760], ['crate', 1200, 240]],
   },
 ];
 

@@ -1,7 +1,7 @@
 // המתחזה – screens and interactions. Rendering is driven by app.js.
 
-import { play, haptic } from './sfx.js?v=47';
-import { confetti } from './anim.js?v=47';
+import { play, haptic } from './sfx.js?v=48';
+import { confetti } from './anim.js?v=48';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
