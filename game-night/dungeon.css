@@ -1,0 +1,14 @@
+/* המבוך */
+body.dungeon #game { background: #0c0a10; }
+.dg-ico { display: inline-block; vertical-align: middle; background-image: url(dungeon/tiles.png); background-repeat: no-repeat; image-rendering: pixelated; }
+.dg-hearts { background: rgba(0,0,0,.45); padding: 3px 10px; border-radius: 999px; font-size: .95rem; letter-spacing: -1px; text-align: center; }
+.dg-hearts .ar-ping { letter-spacing: 0; }
+.dg-items { position: absolute; top: calc(max(8px, env(safe-area-inset-top)) + 48px); left: 10px; display: flex; flex-wrap: wrap; gap: 3px; max-width: 45vw; }
+.dg-items span { background: rgba(0,0,0,.45); border-radius: 6px; padding: 2px; display: inline-flex; }
+.dg-boss { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 6px); left: 50%; transform: translateX(-50%); width: min(70vw, 420px); text-align: center; font-weight: 800; text-shadow: 0 2px 4px #000; }
+.dg-boss .bar { height: 12px; background: rgba(0,0,0,.6); border-radius: 999px; overflow: hidden; margin-top: 4px; border: 2px solid rgba(255,255,255,.3); }
+.dg-boss .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff3b3b, #ff8a3d); transition: width .2s; }
+.dg-stats { display: flex; justify-content: center; gap: 14px; margin: 10px 0 14px; font-weight: 700; flex-wrap: wrap; }
+.dg-best { font-weight: 700; color: var(--accent); }
+.dg-team li { display: flex; align-items: center; gap: 6px; }
+.dg-team small { opacity: .7; }

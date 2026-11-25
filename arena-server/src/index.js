@@ -7,6 +7,7 @@ import {
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
   canSee, STEP, NEAR, INTERP_MS, GRENADE, PROPS, propRect, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
 } from '../../game-night/arena-core.js';
+import { DungeonSim, ENEMY_LIST, ITEM_LIST, roomAt as dRoomAt, MAX_PLAYERS as D_MAX, TICK as D_TICK, collide as dCollide } from '../../game-night/dungeon-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -22,6 +23,14 @@ export default {
     if (url.pathname === '/api/quick' || url.pathname === '/api/new' || url.pathname === '/api/check') {
       const r = await mm.fetch(`https://mm${url.pathname.slice(4)}${url.search}`);
       return json(await r.json());
+    }
+    const dm = url.pathname.match(/^\/dws\/([A-Z]{4})$/); // the dungeon game
+    if (dm) {
+      if (req.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
+      const run = env.DUNGEON.get(env.DUNGEON.idFromName(dm[1]));
+      const headers = new Headers(req.headers);
+      headers.set('x-code', dm[1]);
+      return run.fetch(new Request(req.url, { headers }));
     }
     const m = url.pathname.match(/^\/ws\/([A-Z]{4})$/);
     if (m) {
@@ -986,5 +995,172 @@ export class Room {
       next: this.phase === 'end' && this.autoNext ? Math.max(0, Math.round((this.autoNext - Date.now()) / 1000)) : null,
       results: this.results,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// המבוך: a co-op dungeon run for 1–4 players. Lobby → run (DungeonSim) → won / lost → again.
+export class Dungeon {
+  constructor(state, env) {
+    this.env = env;
+    this.code = null;
+    this.players = new Map(); // id -> { id, name, on }
+    this.sockets = new Map();
+    this.host = null;
+    this.phase = 'lobby'; // lobby | play | end
+    this.sim = null;
+    this.events = [];
+    this.timer = null;
+    this.tickNo = 0;
+  }
+
+  async fetch(req) {
+    this.code ||= req.headers.get('x-code');
+    const [client, server] = Object.values(new WebSocketPair());
+    server.accept();
+    server.addEventListener('message', e => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      try { this.onMessage(server, msg); } catch (err) { try { server.send(JSON.stringify({ t: 'err', m: 'שגיאת שרת' })); } catch {} }
+    });
+    const gone = () => this.onClose(server);
+    server.addEventListener('close', gone);
+    server.addEventListener('error', gone);
+    if (!this.timer) { this.last = Date.now(); this.acc = 0; this.timer = setInterval(() => this.loop(), 1000 / 30); }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  send(ws, m) { try { ws.send(JSON.stringify(m)); } catch {} }
+  broadcast(m) { const s = JSON.stringify(m); for (const ws of this.sockets.keys()) { try { ws.send(s); } catch {} } }
+
+  report(closed = false) {
+    if (!this.code) return;
+    const body = JSON.stringify({ code: this.code, pub: false, humans: [...this.players.values()].filter(p => p.on).length, phase: this.phase, mode: 'dungeon', closed });
+    this.env.MM.get(this.env.MM.idFromName('main')).fetch('https://mm/report', { method: 'POST', body }).catch(() => {});
+  }
+
+  onMessage(ws, msg) {
+    if (msg.t === 'ping') return this.send(ws, { t: 'pong', c: msg.c });
+    if (msg.t === 'hello') return this.join(ws, msg);
+    const id = this.sockets.get(ws), p = id && this.players.get(id);
+    if (!p) return;
+    if (msg.t === 'in' && this.sim) {
+      const sp = this.sim.players.get(id);
+      if (!sp) return;
+      sp.input = { a: Number(msg.a) || 0, f: !!msg.f };
+      if (Number.isFinite(msg.r)) sp.rtt = Math.max(0, Math.min(400, msg.r));
+      if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) this.sim.applyCmd(sp, c);
+      return;
+    }
+    if (msg.t === 'start' && id === this.host && this.phase !== 'play') return this.startRun();
+    if (msg.t === 'lobby' && id === this.host && this.phase === 'end') { this.phase = 'lobby'; this.sim = null; return this.sendMeta(); }
+  }
+
+  join(ws, msg) {
+    const id = String(msg.id || '').slice(0, 20), name = String(msg.name || '').trim().slice(0, 16) || 'שחקן';
+    if (!id) return;
+    let p = this.players.get(id);
+    if (!p) {
+      if (this.players.size >= D_MAX) { this.send(ws, { t: 'err', m: 'החדר מלא', fatal: true }); return ws.close(1000, 'full'); }
+      p = { id, name, on: true };
+      this.players.set(id, p);
+      // joining a run in progress: appear next to a friend
+      if (this.sim && this.phase === 'play' && !this.sim.players.has(id)) {
+        const sp = this.sim.newPlayer({ id, name }, this.sim.players.size);
+        const friend = this.sim.alivePlayers()[0];
+        if (friend) { sp.x = friend.x + 30; sp.y = friend.y; dCollide(sp, this.sim.solid); }
+        this.sim.players.set(id, sp);
+      }
+    }
+    for (const [w, pid] of this.sockets) if (pid === id && w !== ws) { this.sockets.delete(w); try { w.close(1000, 'replaced'); } catch {} }
+    p.name = name; p.on = true; p.off = 0;
+    this.sockets.set(ws, id);
+    if (!this.host || !this.players.get(this.host)?.on) this.host = id;
+    const sp = this.sim?.players.get(id);
+    if (sp) sp.lastSeq = 0;
+    this.send(ws, { t: 'welcome', id, code: this.code });
+    this.sendMeta();
+    if (msg.solo && this.phase === 'lobby' && this.players.size === 1) this.startRun(); // "play alone" starts at once
+    this.report();
+  }
+
+  onClose(ws) {
+    const id = this.sockets.get(ws);
+    if (!this.sockets.delete(ws) || !id || [...this.sockets.values()].includes(id)) return;
+    const p = this.players.get(id);
+    if (!p) return;
+    p.on = false; p.off = Date.now();
+    if (this.phase === 'lobby') this.players.delete(id);
+    if (!this.players.get(this.host)?.on) this.host = [...this.players.values()].find(o => o.on)?.id || null;
+    this.sendMeta();
+    this.report();
+  }
+
+  startRun() {
+    const ps = [...this.players.values()].filter(p => p.on);
+    if (!ps.length) return;
+    this.sim = new DungeonSim(ps.map(p => ({ id: p.id, name: p.name })), Math.floor(Math.random() * 1e9), ev => this.events.push(ev));
+    this.phase = 'play';
+    this.sendMeta();
+    this.report();
+  }
+
+  loop() {
+    const now = Date.now();
+    this.acc += Math.min(0.25, (now - this.last) / 1000);
+    this.last = now;
+    // players gone for a while leave the run
+    for (const p of [...this.players.values()]) if (!p.on && now - p.off > 30000) { this.players.delete(p.id); this.sim?.players.delete(p.id); this.sendMeta(); }
+    while (this.acc >= D_TICK) {
+      this.acc -= D_TICK;
+      if (this.phase === 'play' && this.sim) {
+        // a disconnected player stands still
+        for (const sp of this.sim.players.values()) if (!this.players.get(sp.id)?.on) sp.input = { a: sp.aim, f: false };
+        this.sim.tick();
+        this.tickNo++;
+        if (this.sim.phase !== 'play') { this.phase = 'end'; this.sendSnapshot(); this.sendMeta(); this.report(); }
+        else this.sendSnapshot();
+      }
+    }
+    if (this.sockets.size === 0) {
+      this.emptySince ||= now;
+      if (now - this.emptySince > 60000) { clearInterval(this.timer); this.timer = null; this.players.clear(); this.sim = null; this.phase = 'lobby'; this.report(true); }
+    } else this.emptySince = 0;
+  }
+
+  sendMeta() {
+    const sim = this.sim;
+    this.broadcast({
+      t: 'room', code: this.code, host: this.host, phase: this.phase,
+      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, on: p.on, hero: sim?.players.get(p.id)?.hero ?? null })),
+      run: sim ? { seed: sim.seed, floor: sim.floor, result: sim.phase, kills: sim.kills, coins: sim.coins, t: Math.round(sim.t) } : null,
+    });
+  }
+
+  sendSnapshot() {
+    const sim = this.sim, r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+    const rooms = new Set([...sim.players.values()].filter(p => p.alive).map(p => dRoomAt(sim.layout, p.x, p.y)));
+    const ack = {};
+    const players = [...sim.players.values()].map(p => {
+      ack[p.id] = p.lastSeq;
+      return [p.id, r1(p.x), r1(p.y), r2(p.aim), p.hp, p.st.maxHp, p.alive ? 1 : 0, sim.t < p.inv ? 1 : 0, p.dashT > 0 ? 1 : 0, r1(p.vx || 0), r1(p.vy || 0), p.hero, p.st.orbit, Math.round(p.st.speed)];
+    });
+    const base = {
+      t: 's', ph: sim.phase, fl: sim.floor, seed: sim.seed, ot: r2(sim.t), ack, p: players,
+      rs: sim.rooms.map(r => (r.visited ? 1 : 0) | (r.cleared ? 2 : 0) | (r.locked ? 4 : 0)),
+      e: sim.enemies.filter(e => rooms.has(e.room)).map(e => [e.id, ENEMY_LIST.indexOf(e.type), r1(e.x), r1(e.y), Math.ceil(e.hp), Math.ceil(e.maxHp), sim.t < e.wake ? 1 : 0, sim.t < e.slow ? 1 : 0, e.face]),
+      s: sim.shots.map(s => [s.id, r1(s.x), r1(s.y), r1(s.vx), r1(s.vy), r1(s.r), s.enemy ? 1 : 0, s.owner || null]),
+      u: sim.pickups.map(u => [u.id, u.type, r1(u.x), r1(u.y)]),
+      ped: sim.pedestals.map(d => [d.id, ITEM_LIST.indexOf(d.item), r1(d.x), r1(d.y), d.set]),
+      td: sim.trapdoor ? [r1(sim.trapdoor.x), r1(sim.trapdoor.y)] : null,
+      ev: this.events,
+      coins: sim.coins, kills: sim.kills,
+    };
+    this.events = [];
+    for (const [ws, id] of this.sockets) {
+      const sp = sim.players.get(id);
+      const me = sp ? { items: sp.items, st: { dmg: Math.round(sp.st.dmg), cd: r2(sp.st.cd), shots: sp.st.shots, life: r2(sp.st.life), size: r1(sp.st.size) }, dc: r1(Math.max(0, sp.dashCd)), took: sp.tookSets || [] } : null;
+      try { ws.send(JSON.stringify({ ...base, me })); } catch {}
+    }
   }
 }

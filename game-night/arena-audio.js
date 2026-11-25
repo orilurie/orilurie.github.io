@@ -1,7 +1,7 @@
 // זירה – recorded sound effects (CC0, see sounds/CREDITS.txt) with simple positional audio:
 // sounds from far away are quieter and duller, and pan left/right by where they happen.
 
-import { settings } from './sfx.js?v=49';
+import { settings } from './sfx.js?v=50';
 
 // Which pistol shot to use: picked on sounds.html (saved per device), default 3.
 export function gunChoice() {
@@ -25,6 +25,9 @@ const FILES = {
   die: ['die'], block: ['block'], kill: ['kill'], pickup: ['pickup'], count: ['count'], go: ['go'],
 };
 const BASE_VOL = { shot_rocket: 0.7, shot_laser: 0.5, shot_boomerang: 0.6, boom: 0.9, throw: 0.6, crate: 0.7, shot_smg: 0.4, shot_shotgun: 0.8, shot_sniper: 0.85, dash: 0.5, empty: 0.6, shot: 0.6, hit: 0.8, hurt: 0.9, wall: 0.25, step: 0.35, die: 0.8, block: 0.4, kill: 0.6, pickup: 0.6, count: 0.5, go: 0.6 };
+
+// other games add their own sounds: { name: [files] }, { name: volume }
+export function addSounds(files, vols = {}) { Object.assign(FILES, files); Object.assign(BASE_VOL, vols); }
 
 let ctx = null, master = null;
 const buffers = {};

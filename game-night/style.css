@@ -767,3 +767,5 @@ html[data-gfx="rich"] .im-front {
   border: 3px solid #c59a52;
 }
 html[data-gfx="rich"] .im-front .im-art { display: block; width: 54px; height: 54px; }
+html[data-gfx="rich"] .game-card.gc-dungeon { background: linear-gradient(145deg, #6a4a8a, #2a1838); }
+a.game-card.gc-dungeon { grid-column: auto; }

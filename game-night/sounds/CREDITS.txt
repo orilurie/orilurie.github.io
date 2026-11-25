@@ -5,3 +5,4 @@ Sounds used by the arena game (זירה). All are CC0 (public domain):
   5 "Single Pistol Gunshot 3" by morganpurkis (385811) · 6 "Heathers Gunshot Effect2" by okieactor (415912) ·
   7 "Gunshot_002" by Brokenphono (344142) · 8 "GUNSHOT.WAV" by erkanozan (51749)
 - everything else: Kenney (www.kenney.nl) – Impact Sounds, Sci-Fi Sounds, Interface Sounds (CC0), converted to mp3
+- dg_*.mp3 (the dungeon game): Kenney RPG Audio, Sci-Fi Sounds, Impact Sounds (CC0)

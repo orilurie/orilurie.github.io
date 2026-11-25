@@ -1,14 +1,14 @@
-import * as Hathatul from './game.js?v=49';
-import * as Quartets from './quartets.js?v=49';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=49';
-import * as Battleship from './battleship.js?v=49';
-import * as Imposter from './imposter.js?v=49';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=49';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=49';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=49';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=49';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=49';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=49';
+import * as Hathatul from './game.js?v=50';
+import * as Quartets from './quartets.js?v=50';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=50';
+import * as Battleship from './battleship.js?v=50';
+import * as Imposter from './imposter.js?v=50';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=50';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=50';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=50';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=50';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=50';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=50';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -19,7 +19,7 @@ const GAMES = {
   imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', art: 'detective', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 49; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 50; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -475,6 +475,7 @@ function renderHome() {
       <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
         ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
           <span class="gc-icon">${g.icon}</span><img class="gc-art" src="art/${g.art}.png" alt=""><b>${g.name}</b></button>`).join('')}
+        <a class="game-card gc-dungeon" href="dungeon.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🐉</span><img class="gc-art" src="art/dragon.png" alt=""><b>המבוך</b><small>הרפתקה – לבד או עם חברים</small></a>
         <a class="game-card gc-arena" href="arena.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🔫</span><img class="gc-art" src="art/pistol.png" alt=""><b>זירה</b><small>יריות בזמן אמת</small></a>
       </div>
       <p class="sub">${{ battleship: 'משחק אונליין לשני שחקנים.', imposter: 'משחק מילים אונליין ל-3 עד 6 שחקנים.' }[ui.gameType] || 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>

@@ -16,3 +16,12 @@ class_name = "Matchmaker"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Matchmaker"]
+
+# המבוך (the dungeon game): one Durable Object per run
+[[durable_objects.bindings]]
+name = "DUNGEON"
+class_name = "Dungeon"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Dungeon"]
