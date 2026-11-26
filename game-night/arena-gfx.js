@@ -1,7 +1,7 @@
 // זירה – graphics: sprites and effects from Kenney's "Top-down Shooter" and "Particle Pack"
 // (both CC0, see arena-gfx/LICENSE-*), plus pseudo-3D walls and soft lighting.
 
-import { isRich } from './gfx-mode.js?v=52';
+import { isRich } from './gfx-mode.js?v=53';
 
 const BASE = 'arena-gfx/';
 const imgs = {};

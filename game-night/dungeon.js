@@ -2,11 +2,11 @@
 // The run lives on the game server (arena-server/, class Dungeon); this file draws it, predicts
 // your own movement (same step model as the arena) and sends your input.
 
-import * as core from './dungeon-core.js?v=52';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=52';
-import { sound, addSounds } from './arena-audio.js?v=52';
-import * as gfx from './arena-gfx.js?v=52';
-import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=52';
+import * as core from './dungeon-core.js?v=53';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=53';
+import { sound, addSounds } from './arena-audio.js?v=53';
+import * as gfx from './arena-gfx.js?v=53';
+import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=53';
 
 const { T, CW, CH, RW, RH, DASH, INTERP_MS, ITEMS, ITEM_LIST, ENEMIES, ENEMY_LIST, MAX_PLAYERS, genFloor, solids, move, roomAt, blocked } = core;
 // v2 tables from the core (with a fallback so an older core never breaks the page)
@@ -23,10 +23,10 @@ const hero = h => HEROES[((h | 0) % HEROES.length + HEROES.length) % HEROES.leng
 
 // menus (hero picker, gems, daily leaderboard, admin panel) – loaded on the side so a problem there never breaks the game
 let menus = null;
-import('./dungeon-menus.js?v=52').then(m => { menus = m; if (ui.screen !== 'room' || meta?.phase === 'lobby') render(); }).catch(() => {});
+import('./dungeon-menus.js?v=53').then(m => { menus = m; if (ui.screen !== 'room' || meta?.phase === 'lobby') render(); }).catch(() => {});
 const isAdmin = () => (menus ? menus.isAdminName(ui.name) : false);
 
-export const VERSION = 52;
+export const VERSION = 53;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -161,7 +161,7 @@ addEventListener('popstate', () => {
 function leave(err = '') {
   wantOpen = false; try { ws?.close(); } catch {}
   ws = null; meta = null; lastSnap = null; snaps.length = 0; layout = null;
-  ui.screen = 'home'; ui.error = err; ui.daily = false; closeAdmin();
+  ui.screen = 'home'; ui.error = err; ui.daily = false; ui.bag = false; closeAdmin();
   history.replaceState(null, '', location.pathname + (debugOn ? '?debug=1' : '') + (params.get('server') ? `${debugOn ? '&' : '?'}server=${encodeURIComponent(SERVER)}` : ''));
   render();
 }
@@ -220,6 +220,7 @@ addEventListener('keydown', e => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) dashPress();
   if ((e.code === 'KeyQ' || e.code === 'KeyE') && !e.repeat) abilityPress();
+  if ((e.code === 'KeyI' || e.code === 'KeyB' || e.code === 'Tab') && !e.repeat) { e.preventDefault(); ui.bag = !ui.bag; hudKey = ''; renderHud(); }
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); sticks.move = sticks.aim = null; if (mouse) mouse.down = false; });
@@ -833,7 +834,7 @@ function renderHud() {
   const s = lastSnap, row = myRow();
   const hearts = row ? Array.from({ length: Math.ceil(row[5] / 2) }, (_, i) => (row[4] >= (i + 1) * 2 ? '❤️' : row[4] === i * 2 + 1 ? '💔' : '🖤')).join('') : '';
   const boss = foes.find(e => ENEMIES[e.type]?.boss);
-  const items = (s?.me?.items || []).filter(it => ITEMS[it]).map(it => `<span class="r${ITEMS[it].r || 0}" title="${esc(ITEMS[it].name)}">${itemIconHtml(ITEMS[it], 22)}</span>`).join('');
+  const myItems = (s?.me?.items || []).filter(it => ITEMS[it]);
   const h = hero(row?.[11] ?? ui.hero), wk = s?.me?.w ?? row?.[14], w = WEAPONS[wk];
   const alive = row && row[6] && meta.phase === 'play';
   const abReady = row?.[15] ?? 1, ready = abReady >= 1, abLeft = s?.me?.ab?.cd ?? 0;
@@ -846,7 +847,8 @@ function renderHud() {
       <div class="ar-time">⬇️ ${s?.fl ?? 1}/3 · 🪙 ${s?.coins ?? 0}${s?.daily || meta.run?.daily ? ` · 🗓️ ${s?.score ?? 0}` : ''}</div>
       <div class="dg-hearts">${hearts}${godOn ? ' <b class="dg-god">GOD</b>' : ''}<small class="ar-ping">📶 ${Math.round(rtt)}</small></div>
     </div>
-    <div class="dg-items">${w ? `<span class="dg-weapon" title="${esc(w.name)}">${tileIcon(w.spr, 22)}<small>${esc(w.name)}</small></span>` : ''}${items}</div>
+    <div class="dg-items">${w ? `<span class="dg-weapon" title="${esc(w.name)}">${tileIcon(w.spr, 22)}<small>${esc(w.name)}</small></span>` : ''}<button class="dg-bagbtn ${ui.bag ? 'on' : ''}" data-act="bag" title="התיק (I)">🎒${myItems.length ? `<b>${myItems.length}</b>` : ''}</button></div>
+    ${ui.bag ? bagHtml(myItems, w, s?.me?.st) : ''}
     ${boss ? `<div class="dg-boss ${boss.phase === 2 ? 'p2' : ''}"><b>${esc(ENEMIES[boss.type].name)}${boss.phase === 2 ? ' 🔥' : ''}</b><div class="bar"><i style="width:${Math.max(0, boss.hp / boss.maxHp * 100)}%"></i></div></div>` : ''}
     ${banner ? `<div class="ar-announce ${banner.big ? 'mine' : 'small'}">${esc(banner.text)}</div>` : ''}
     ${ui.reconnecting ? '<div class="ar-msg warn">📡 מתחבר מחדש…</div>' : ''}
@@ -856,6 +858,21 @@ function renderHud() {
   if (html !== hudKey) { $hud.innerHTML = html; hudKey = html; }
   const ab = $hud.querySelector('.dg-ab');
   if (ab) ab.style.setProperty('--p', String(Math.max(0, Math.min(1, abReady))));
+}
+// the bag: every item once, with ×N for copies (copies stack = a stronger item)
+function bagHtml(list, w, st) {
+  const counts = new Map();
+  for (const it of list) counts.set(it, (counts.get(it) || 0) + 1);
+  const rows = [...counts].sort((a, b) => (ITEMS[b[0]].r || 0) - (ITEMS[a[0]].r || 0) || b[1] - a[1]).map(([it, n]) => {
+    const d = ITEMS[it];
+    return `<div class="dg-bagrow r${d.r || 0}"><span class="ic">${itemIconHtml(d, 30)}${n > 1 ? `<b class="cnt">×${n}</b>` : ''}</span><div><b>${esc(d.name)}${n > 1 ? ` <small class="lvl">רמה ${n}</small>` : ''}</b><small>${esc(d.desc)}</small></div></div>`;
+  }).join('');
+  const stats = st ? `<div class="dg-bagstats"><span>⚔️ ${st.dmg}</span><span>⏱️ ${(1 / Math.max(0.05, st.cd)).toFixed(1)}/ש׳</span><span>✨ ${st.shots}</span></div>` : '';
+  return `<div class="dg-bag" data-stop="1"><div class="dg-baghead"><b>🎒 התיק</b><button class="ar-x" data-act="bag">✕</button></div>
+    ${w ? `<div class="dg-bagrow wpn"><span class="ic">${tileIcon(w.spr, 30)}</span><div><b>${esc(w.name)}</b><small>הנשק שלך – דרכו על נשק אחר כדי להחליף</small></div></div>` : ''}
+    ${stats}
+    ${rows || '<p class="sub">עוד אין פריטים – חפשו בחדרי אוצר, בחנות ובתיבות</p>'}
+  </div>`;
 }
 function endHtml() {
   const r = meta.run || {}, won = r.result === 'won', isHost = meta.host === myId;
@@ -984,6 +1001,7 @@ document.addEventListener('click', async e => {
     case 'share': { const link = `${location.origin}${location.pathname}?room=${meta.code}`; if (navigator.share) navigator.share({ title: 'המבוך', text: `בואו למבוך איתי! קוד: ${meta.code}`, url: link }).catch(() => {}); else { navigator.clipboard?.writeText(link); toast('הקישור הועתק'); } return; }
     case 'start': play('pop'); return send({ t: 'start' });
     case 'sound': toggleSfx('sound'); return;
+    case 'bag': ui.bag = !ui.bag; hudKey = ''; return renderHud();
     case 'gfx': setGfxMode(gfxMode() === 'rich' ? 'simple' : 'rich'); return render();
   }
 });

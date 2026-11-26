@@ -67,3 +67,21 @@ body.dungeon #game { background: #0c0a10; }
   .dg-stats { margin: 4px 0 6px; }
   .dg-endboard { max-height: 30vh; }
 }
+/* the bag (🎒): items grouped, ×N for copies */
+.dg-bagbtn { position: relative; background: rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.35); color: #fff; border-radius: 8px; font-size: 1.15rem; padding: 1px 6px; min-height: 30px; cursor: pointer; }
+.dg-bagbtn.on { border-color: #ffd27a; }
+.dg-bagbtn b { position: absolute; top: -7px; left: -7px; background: #ffc531; color: #3a2500; font-size: .7rem; border-radius: 9px; min-width: 17px; height: 17px; line-height: 17px; text-align: center; padding: 0 3px; }
+.dg-bag { pointer-events: auto; position: absolute; top: calc(max(8px, env(safe-area-inset-top)) + 86px); left: 10px; width: min(300px, calc(100vw - 20px)); max-height: calc(100vh - 140px); overflow-y: auto; background: rgba(20,16,28,.93); border: 2px solid rgba(255,210,122,.45); border-radius: 14px; padding: 8px 10px 10px; direction: rtl; text-align: right; z-index: 5; box-shadow: 0 8px 24px rgba(0,0,0,.5); touch-action: pan-y; }
+.dg-baghead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 1.05rem; }
+.dg-baghead .ar-x { width: 30px; height: 30px; }
+.dg-bagrow { display: flex; gap: 9px; align-items: center; padding: 5px 4px; border-radius: 10px; margin-bottom: 4px; background: rgba(255,255,255,.05); }
+.dg-bagrow .ic { position: relative; flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px; background: rgba(0,0,0,.35); box-shadow: inset 0 0 0 2px rgba(255,255,255,.25); }
+.dg-bagrow.r1 .ic { box-shadow: inset 0 0 0 2px #5aa9ff; }
+.dg-bagrow.r2 .ic { box-shadow: inset 0 0 0 2px #ffc531, 0 0 8px rgba(255,197,49,.6); }
+.dg-bagrow.wpn { background: rgba(255,210,122,.12); }
+.dg-bagrow .cnt { position: absolute; bottom: -5px; left: -6px; background: #ffc531; color: #3a2500; font-size: .72rem; border-radius: 8px; padding: 0 4px; }
+.dg-bagrow div { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.dg-bagrow div b { font-size: .92rem; }
+.dg-bagrow small { font-size: .74rem; opacity: .8; }
+.dg-bagrow .lvl { display: inline; color: #ffd27a; opacity: 1; font-weight: 700; }
+.dg-bagstats { display: flex; gap: 10px; justify-content: center; font-size: .8rem; margin: 2px 0 8px; opacity: .9; }
