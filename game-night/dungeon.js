@@ -842,7 +842,7 @@ function renderHud() {
   const godOn = s?.me?.god || row?.[18];
   const html = `
     <div class="ar-top">
-      <span class="dg-btns"><button class="ar-x" data-act="quit">✕</button> <button class="ar-x" data-act="sound">${sfxSettings.sound ? '🔊' : '🔇'}</button>${isAdmin() && !adminOpen ? ` <button class="ar-x dg-adm" data-act="admin">⚙️</button>` : ''}</span>
+      <span class="dg-btns"><button class="ar-x" data-act="quit">✕</button> <button class="ar-x" data-act="sound">${sfxSettings.sound ? '🔊' : '🔇'}</button></span>
       <div class="ar-time">⬇️ ${s?.fl ?? 1}/3 · 🪙 ${s?.coins ?? 0}${s?.daily || meta.run?.daily ? ` · 🗓️ ${s?.score ?? 0}` : ''}</div>
       <div class="dg-hearts">${hearts}${godOn ? ' <b class="dg-god">GOD</b>' : ''}<small class="ar-ping">📶 ${Math.round(rtt)}</small></div>
     </div>
@@ -869,8 +869,8 @@ function endHtml() {
     <div class="dg-stats"><div>⏱️ ${mm}:${ss}</div><div>⚔️ ${r.kills ?? 0} מפלצות</div><div>🪙 ${r.coins ?? 0}</div></div>
     ${gemsLine}
     ${r.daily && endInfo?.board ? `<div class="dg-endboard">${endInfo.board}</div>` : ''}
-    ${r.daily ? '' : isHost ? '<button class="primary" data-act="start">🔁 ריצה חדשה</button>' : '<p class="sub">מחכים למארח/ת…</p>'}
-    <button class="ghost" data-act="quit">יציאה</button>
+    <div class="dg-endbtns">${r.daily ? '' : isHost ? '<button class="primary" data-act="start">🔁 ריצה חדשה</button>' : '<p class="sub">מחכים למארח/ת…</p>'}
+    <button class="ghost" data-act="quit">יציאה</button></div>
   </div></div>`;
 }
 
@@ -879,7 +879,7 @@ function render() {
   const playing = ui.screen === 'room' && meta && meta.phase !== 'lobby';
   document.body.classList.toggle('ar-playing', !!playing);
   $game.hidden = !playing;
-  if (playing) { $app.innerHTML = ''; renderHud(); return; }
+  if (playing) { $app.innerHTML = ''; ensureAdmin(); renderHud(); return; }
   $hud.innerHTML = ''; hudKey = '';
   if (ui.screen === 'home') return renderHome();
   if (ui.screen === 'connecting' || !meta) { $app.innerHTML = '<div class="panel center"><div class="spinner"></div><p>נכנסים למבוך…</p><button class="ghost" data-act="quit">ביטול</button></div>'; return; }
@@ -985,9 +985,6 @@ document.addEventListener('click', async e => {
     case 'start': play('pop'); return send({ t: 'start' });
     case 'sound': toggleSfx('sound'); return;
     case 'gfx': setGfxMode(gfxMode() === 'rich' ? 'simple' : 'rich'); return render();
-    case 'admin':
-      if (menus && isAdmin()) { adminOpen = true; hudKey = ''; menus.openAdminPanel({ send: adminSend, ITEMS, ITEM_LIST, WEAPONS, WEAPON_LIST, getState: () => ({ god: !!(lastSnap?.me?.god || myRow()?.[18]), speed: adminLocal.speed, dmg: adminLocal.dmg, coins: lastSnap?.coins ?? 0 }) }); }
-      return;
   }
 });
 
@@ -995,6 +992,15 @@ document.addEventListener('click', async e => {
 let adminOpen = false;
 const adminLocal = { speed: false, dmg: false };
 function adminSend(m) { if (m?.c === 'speed' || m?.c === 'dmg') adminLocal[m.c] = !adminLocal[m.c]; send(m); }
+// the admin's ⚙️ (D's panel brings its own round button at the left edge): created closed when a run starts
+function ensureAdmin() {
+  if (adminOpen || !menus || !isAdmin()) return;
+  adminOpen = true;
+  try {
+    const api = menus.openAdminPanel({ send: adminSend, ITEMS, ITEM_LIST, WEAPONS, WEAPON_LIST, getState: () => ({ god: !!(lastSnap?.me?.god || myRow()?.[18]), speed: adminLocal.speed, dmg: adminLocal.dmg, coins: lastSnap?.coins ?? 0 }) });
+    api?.close?.();
+  } catch (e) { console.warn('admin panel', e); }
+}
 function closeAdmin() { if (adminOpen) { try { menus?.closeAdminPanel?.(); } catch {} } adminOpen = false; adminLocal.speed = adminLocal.dmg = false; }
 
 // ---------- main loop ----------
@@ -1016,5 +1022,6 @@ function frame(now) {
   if (now - hudAt > 80) { hudAt = now; renderHud(); }
 }
 requestAnimationFrame(frame);
+if (debugOn) window.__dg = { get snap() { return lastSnap; }, get layout() { return layout; }, get me() { return me; }, get meta() { return meta; }, send };
 gfx.preload();
 render();

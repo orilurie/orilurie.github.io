@@ -53,3 +53,17 @@ body.dungeon #game { background: #0c0a10; }
 .dg-heroes-fallback button { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .dg-heroes-fallback button.sel { outline: 3px solid var(--accent, #ffd27a); }
 .dg-daily-btn small { display: block; font-size: .7rem; opacity: .75; }
+@media (max-width: 480px) { /* phone portrait: keep the top bar on one line */
+  .ar-top { padding: 0 8px; gap: 4px; }
+  .ar-top .ar-time { font-size: .9rem; padding: 4px 10px; white-space: nowrap; }
+  .ar-top .ar-x { width: 32px; height: 32px; }
+  .dg-hearts { font-size: .8rem; padding: 3px 7px; max-width: 34vw; }
+  .dg-hearts .ar-ping { display: none; }
+  .dg-items { max-width: 62vw; }
+}
+.dg-endbtns { position: sticky; bottom: -1px; background: var(--panel, #fff); padding-top: 4px; }
+@media (max-height: 460px) {
+  .ar-end .panel h2 { margin: 0 0 4px; font-size: 1.3rem; }
+  .dg-stats { margin: 4px 0 6px; }
+  .dg-endboard { max-height: 30vh; }
+}

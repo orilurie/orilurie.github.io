@@ -44,7 +44,7 @@ export const WEAPONS = {
   hammer: { name: 'פטיש', spr: 117, kind: 'wave', cd: 1.9, dmg: 3, r: 110 },
 };
 export const WEAPON_LIST = Object.keys(WEAPONS);
-export const CHEST_SPR = { wood: 89, gold: 89, open: 91, mimic: 92 };
+export const CHEST_SPR = { wood: 89, gold: 90, open: 91, mimic: 92 };
 
 // ---------- items (upgrades) ----------
 // spr: tile index in the Tiny Dungeon sheet; icon (optional): game-night/dungeon/ui/<icon>.png; r: rarity 0 common, 1 rare, 2 legendary
@@ -167,11 +167,12 @@ export function genFloor(seed, floor) {
   const need = 3 + (wantAltar ? 1 : 0) + (wantChal ? 1 : 0); // boss, treasure, shop (+ altar, challenge)
   const endCount = () => [...cells.values()].filter(c => !isStart(c) && nb(c.gx, c.gy) === 1).length;
   for (let guard = 0; endCount() < need && guard < 3000; guard++) {
-    const list = [...cells.values()].filter(c => isStart(c) || nb(c.gx, c.gy) !== 1);
+    // prefer branching off a corridor (+1 dead end); sometimes extend a dead end (unblocks tight clusters)
+    const all = [...cells.values()], list = guard % 4 === 3 ? all : all.filter(c => isStart(c) || nb(c.gx, c.gy) !== 1);
     const c = list[Math.floor(R() * list.length)];
     const [dx, dy] = Object.values(DIRS)[Math.floor(R() * 4)];
     const nx = c.gx + dx, ny = c.gy + dy;
-    if (nx < 1 || ny < 1 || nx >= G - 1 || ny >= G - 1 || cells.has(key(nx, ny)) || nb(nx, ny) !== 1) continue;
+    if (nx < 0 || ny < 0 || nx >= G || ny >= G || cells.has(key(nx, ny)) || nb(nx, ny) !== 1) continue;
     cells.set(key(nx, ny), { gx: nx, gy: ny });
   }
   const rooms = [...cells.values()].map((c, id) => ({ id, gx: c.gx, gy: c.gy, x: c.gx * CW, y: c.gy * CH, type: 'normal', doors: {} }));
@@ -503,8 +504,11 @@ export class DungeonSim {
     this.stepOrbits();
     this.stepRevive(dt);
     // rooms: clear when their monsters are gone
+    const alive = this.alivePlayers();
     this.rooms.forEach((rs, id) => {
       if (!rs.locked) return;
+      // nobody alive left inside but friends outside: open it so they can come in (and revive)
+      if (alive.length && !alive.some(p => roomAt(this.layout, p.x, p.y) === id)) { rs.locked = false; rs.mimic = false; this.rebuild(); return; }
       if (this.enemies.some(e => e.room === id)) return;
       if (rs.mimic) { rs.mimic = false; rs.locked = false; this.rebuild(); this.emit({ k: 'clear', room: id }); return; }
       if (this.layout.rooms[id].type === 'challenge' && rs.wave === 1) { rs.wave = 2; this.spawnRoom(id, 2); this.emit({ k: 'cwave', room: id, n: 2 }); return; }
@@ -549,13 +553,16 @@ export class DungeonSim {
     if (!inRect(p.x, p.y, [ix + 30, iy + 30, iw - 60, ih - 60])) return;
     rs.locked = true;
     for (const o of this.players.values()) {
-      if (o === p || !o.alive || roomAt(this.layout, o.x, o.y) === id) continue;
+      if (o === p || !o.alive) continue;
+      const oid = roomAt(this.layout, o.x, o.y);
+      if (oid === id || (oid != null && this.rooms[oid].locked)) continue; // busy in another fight (a mimic)
       o.x = p.x + (Math.random() - 0.5) * 60; o.y = p.y + (Math.random() - 0.5) * 60; o.vx = o.vy = 0; o.dashT = 0;
       this.emit({ k: 'pull', id: o.id });
     }
     this.rebuild();
     for (const o of this.players.values()) if (o.alive) collide(o, this.solid);
-    if (room.type === 'challenge') { rs.wave = 1; this.spawnRoom(id, 1); this.emit({ k: 'cwave', room: id, n: 1 }); }
+    if (this.enemies.some(e => e.room === id)) {} // re-entering a room the party had abandoned: its monsters are still there
+    else if (room.type === 'challenge') { rs.wave = 1; this.spawnRoom(id, 1); this.emit({ k: 'cwave', room: id, n: 1 }); }
     else this.spawnRoom(id);
     this.emit({ k: 'lock', room: id, boss: room.boss || null });
   }
@@ -845,7 +852,7 @@ export class DungeonSim {
       for (const o of this.players.values()) {
         if (!o.alive || Math.hypot(o.x - e.x, o.y - e.y) >= PR + e.r - 2) continue;
         this.hurt(o, e.x, e.y);
-        if (o.st.thorns && e.hp > 0 && (e.ai.thorn || 0) < this.t) { e.ai.thorn = this.t + 0.5; this.damageEnemy(e, o.st.dmg * 0.8 * o.st.thorns, o.id); }
+        if (o.st.thorns && e.hp > 0 && !(e.ai.thorn > this.t)) { e.ai.thorn = this.t + 0.5; this.damageEnemy(e, o.st.dmg * 0.8 * o.st.thorns, o.id); }
         if (e.hp <= 0) break;
       }
     }
@@ -986,7 +993,7 @@ export class DungeonSim {
         const d = Math.hypot(p.x - u.x, p.y - u.y);
         if (d > R || d < 1 || roomAt(this.layout, u.x, u.y) !== here) continue;
         const step = Math.min(d, 380 * dt), nx = u.x + ((p.x - u.x) / d) * step, ny = u.y + ((p.y - u.y) / d) * step;
-        if (!hitsSolid(nx, ny, this.solid, 4)) { u.x = nx; u.y = ny; }
+        if (!hitsSolid(nx, ny, this.solid, 10)) { u.x = nx; u.y = ny; }
       }
     }
   }
