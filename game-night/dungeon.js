@@ -18,6 +18,7 @@ const HEROES = core.HEROES || [
 ];
 const WEAPONS = core.WEAPONS || { wand: { name: 'שרביט', spr: 130, kind: 'shot' } };
 const WEAPON_LIST = core.WEAPON_LIST || Object.keys(WEAPONS);
+const CHEST = core.CHEST_SPR || { wood: 89, gold: 89, open: 91, mimic: 92 };
 const hero = h => HEROES[((h | 0) % HEROES.length + HEROES.length) % HEROES.length];
 
 // menus (hero picker, gems, daily leaderboard, admin panel) – loaded on the side so a problem there never breaks the game
@@ -99,6 +100,20 @@ function slashTex(i, color) {
 }
 const AB_ICON = { shield: ['shield', '🛡️'], fireball: ['fire', '🔥'], daggers: ['dagger', '🗡️'], volley: ['bow', '🏹'] };
 const uiImg = (name, emoji, cls = '') => `<span class="dg-uiimg ${cls}"><img src="dungeon/ui/${name}.png" alt="" onerror="this.remove()"><b>${emoji}</b></span>`;
+// item icons: optional Fluent PNG (ITEMS[k].icon → dungeon/ui/<icon>.png), else the sheet tile
+const iconImgs = new Map();
+function iconImg(name) {
+  if (!name) return null;
+  if (!iconImgs.has(name)) { const im = new Image(); im.src = `dungeon/ui/${name}.png`; iconImgs.set(name, im); }
+  const im = iconImgs.get(name);
+  return im.complete && im.naturalWidth ? im : null;
+}
+function drawIcon(info, x, y, size, alpha = 1) { // top-left at (x, y)
+  const im = iconImg(info.icon);
+  if (!im) return tile(info.spr, x, y, size, false, alpha);
+  g.save(); g.globalAlpha *= alpha; g.imageSmoothingEnabled = true; const k = 0.82; g.drawImage(im, x + size * (1 - k) / 2, y + size * (1 - k) / 2, size * k, size * k); g.restore();
+}
+const itemIconHtml = (it, px) => (it.icon ? `<span class="dg-iic">${tileIcon(it.spr, px)}<img src="dungeon/ui/${it.icon}.png" alt="" width="${px}" height="${px}" style="display:none" onload="this.style.display='';this.previousElementSibling.remove()"></span>` : tileIcon(it.spr, px));
 // glow in full graphics; a soft disc in simple graphics
 function aura(x, y, r, color, a = 0.5) {
   if (isRich()) return gfx.drawGlow(g, x, y, r, color, a);
@@ -111,7 +126,7 @@ function pedInfo(code) {
   if (code === 'hp') return { spr: 115, name: 'מילוי לבבות', r: 0 };
   if (typeof code === 'string' && code.startsWith('w:')) { const w = WEAPONS[code.slice(2)]; return { spr: w?.spr ?? 130, name: w?.name ?? '', r: 1, weapon: true }; }
   const it = ITEMS[code];
-  return it ? { spr: it.spr, name: it.name, desc: it.desc, r: it.r || 0 } : { spr: 66, name: '?', r: 0 };
+  return it ? { spr: it.spr, icon: it.icon, name: it.name, desc: it.desc, r: it.r || 0 } : { spr: 66, name: '?', r: 0 };
 }
 
 // ---------- networking ----------
@@ -146,7 +161,7 @@ addEventListener('popstate', () => {
 function leave(err = '') {
   wantOpen = false; try { ws?.close(); } catch {}
   ws = null; meta = null; lastSnap = null; snaps.length = 0; layout = null;
-  ui.screen = 'home'; ui.error = err; ui.daily = false;
+  ui.screen = 'home'; ui.error = err; ui.daily = false; closeAdmin();
   history.replaceState(null, '', location.pathname + (debugOn ? '?debug=1' : '') + (params.get('server') ? `${debugOn ? '&' : '?'}server=${encodeURIComponent(SERVER)}` : ''));
   render();
 }
@@ -442,6 +457,7 @@ function handleEvents(evs) {
       case 'warn': sound('dg_warn', { vol: 0.8 }); break;
       case 'curse': if (mine(ev.id)) { banner = { text: '🩸 המזבח לקח ממך 2 לבבות', life: 2.6 }; hurtFlash = 0.5; } break;
       case 'cwave': banner = { text: ev.n > 1 ? '⚔️ גל אחרון – עם עלית!' : '⚔️ אתגר! שרדו את הגלים', life: 2.2, big: true }; sound('dg_lock'); break;
+      case 'chain': fx.push({ k: 'bolt', x: ev.x1, y: ev.y1, x2: ev.x2, y2: ev.y2, t0: performance.now(), dur: 200 }); break;
       case 'block': spark(ev.x, ev.y, '#cfe3ff', 6, 140); sound('block', { ...near(ev.x, ev.y), vol: 0.6 }); break;
       case 'admin': toast(`⚙️ ${ev.c}`); break;
     }
@@ -490,10 +506,12 @@ function drawRoom(r, rs, now) {
   if (r.type === 'shop') { // the shopkeeper at the top-centre, behind a little counter
     const bob = Math.sin(now / 500) * 2;
     aura(cx, r.y + S + 26, 34, '#ffd24d', 0.35);
-    tile(86, cx - 22, r.y + S + 2 + bob, 44);
+    tile(86, cx - 22, r.y + S - 2 + bob, 44);
+    tile(72, cx - 24, r.y + S + 30, 48);
+    tile(82, r.x + S, r.y + S, S); tile(82, r.x + S, r.y + 2 * S, S); tile(82, r.x + RW * S, r.y + S, S);
   } else if (r.type === 'altar') { // a gargoyle statue over the altar
     aura(cx, r.y + S + 40, 46, '#ff3b5c', 0.3 + 0.1 * Math.sin(now / 400));
-    tile(7, cx - 20, r.y + S - 4, 40); tile(19, cx - 20, r.y + S + 36, 40);
+    tile(19, cx - 20, r.y, 40); tile(32, cx - 24, r.y + S + 4, 48);
   } else if (r.type === 'secret') {
     tile(82, r.x + 2 * S, r.y + 2 * S, S); tile(82, r.x + (RW - 1) * S, r.y + 2 * S, S);
   }
@@ -507,11 +525,15 @@ function drawCrack(now) {
   if (secretOpen()) { // broken through: rubble on the floor of the opening
     g.fillStyle = '#1a1210'; g.fillRect(x, y, w, h);
     for (let yy = y; yy < y + h; yy += S) for (let xx = x; xx < x + w; xx += S) tile(hash(xx, yy) % 2 ? 24 : 12, xx, yy, S, false, 0.85);
+    if ((lastSnap.rs[sec.from] || 0) & 4) { // shut while the room in front is locked
+      const vert = sec.dir === 'n' || sec.dir === 's';
+      g.save(); g.translate(x + w / 2, y + h / 2); g.rotate(vert ? 0 : Math.PI / 2); tile(46, -S, -S / 2, S); tile(46, 0, -S / 2, S, true); g.restore();
+    }
     return;
   }
   const fromVisited = (lastSnap.rs[sec.from] || 0) & 1;
   if (!fromVisited) return;
-  for (let yy = y; yy < y + h; yy += S) for (let xx = x; xx < x + w; xx += S) tile(40, xx, yy, S);
+  for (let yy = y; yy < y + h; yy += S) for (let xx = x; xx < x + w; xx += S) tile(hash(xx, yy) % 3 ? 28 : 40, xx, yy, S);
   g.fillStyle = 'rgba(0,0,0,0.28)'; g.fillRect(x, y, w, h);
   const hits = lastSnap.ck || 0;
   g.save(); g.strokeStyle = 'rgba(20,14,24,0.95)'; g.lineWidth = 2.5; g.lineCap = 'round';
@@ -534,11 +556,12 @@ function drawPedestals(s, now) {
     const info = pedInfo(codeV), fade = took.includes(set) && !price ? 0.35 : 1;
     const rc = curse ? '#ff3b5c' : RARITY[info.r] || RARITY[0];
     // rarity glow under the pedestal
-    g.save(); g.globalAlpha = 0.55 * fade; g.fillStyle = rc; g.beginPath(); g.ellipse(x, y + 14, 26, 9, 0, 0, Math.PI * 2); g.fill(); g.restore();
+    g.save(); g.globalAlpha = 0.4 * fade; g.fillStyle = rc; g.beginPath(); g.ellipse(x, y + 14, 27, 10, 0, 0, Math.PI * 2); g.fill();
+    g.globalAlpha = 0.95 * fade; g.strokeStyle = rc; g.lineWidth = info.r ? 3 : 2; g.stroke(); g.restore();
     tile(64, x - 20, y - 6, 40, false, fade);
     const bob = Math.sin(now / 300 + x) * 4;
     aura(x, y - 22 + bob, info.r === 2 ? 34 : 26, rc, (info.r === 2 ? 0.75 : 0.5) * fade);
-    tile(info.spr, x - 18, y - 40 + bob, 36, false, fade);
+    drawIcon(info, x - 18, y - 40 + bob, 36, fade);
   }
   // labels after the sprites so nothing covers them
   g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'ltr';
@@ -548,7 +571,7 @@ function drawPedestals(s, now) {
       g.font = '800 14px Rubik, sans-serif';
       const tw = g.measureText(String(price)).width, bw = tw + 26;
       g.fillStyle = 'rgba(0,0,0,0.6)'; roundRect(x - bw / 2, y + 22, bw, 20, 10); g.fill();
-      tile(56, x - bw / 2 + 3, y + 24, 16);
+      coinIcon(x - bw / 2 + 11, y + 32, 6.5);
       g.fillStyle = can ? '#ffe28a' : '#ff5d5d'; g.fillText(String(price), x + 9, y + 32.5);
     }
     if (curse) {
@@ -557,6 +580,11 @@ function drawPedestals(s, now) {
       g.fillStyle = '#ff6b80'; g.fillText('−2 ❤', x, y + (price > 0 ? 54.5 : 32.5));
     }
   }
+}
+function coinIcon(x, y, r) {
+  g.fillStyle = '#b8860b'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffd24d'; g.beginPath(); g.arc(x, y, r * 0.75, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff3b0'; g.fillRect(x - r * 0.15, y - r * 0.45, r * 0.3, r * 0.9);
 }
 function roundRect(x, y, w, h, r) { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); }
 
@@ -595,7 +623,7 @@ function drawWorld(now, dt) {
   for (const [, x, y, kind, opened] of s.ch || []) {
     if (kind) aura(x, y, opened ? 26 : 34 + Math.sin(now / 250) * 4, '#ffc531', opened ? 0.3 : 0.7);
     g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(x, y + 15, 17, 6, 0, 0, Math.PI * 2); g.fill();
-    tile(opened ? 90 : kind ? 91 : 89, x - 20, y - 22, 40, false, opened ? 0.75 : 1);
+    tile(opened ? CHEST.open : kind ? CHEST.gold : CHEST.wood, x - 20, y - 22, 40, false, opened ? 0.8 : 1);
   }
   drawPedestals(s, now);
   // pickups
@@ -619,8 +647,9 @@ function drawWorld(now, dt) {
       const on = Math.floor(now / 90) % 2 === 0;
       if (on) { g.save(); g.globalAlpha = 0.45; g.fillStyle = '#ff2020'; g.beginPath(); g.arc(e.x, e.y, size * 0.48, 0, Math.PI * 2); g.fill(); g.restore(); }
       aura(e.x, e.y, size * 0.9, '#ff2020', on ? 0.9 : 0.4);
-      g.font = `900 ${Math.round(18 + size * 0.2)}px Rubik, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.lineWidth = 4; g.strokeStyle = '#000';
-      g.strokeText('!', e.x, e.y - size / 2 - 4); g.fillStyle = on ? '#ff3b3b' : '#ffd23d'; g.fillText('!', e.x, e.y - size / 2 - 4);
+      const br = 11 + size * 0.06, by = e.y - size / 2 - br - 4;
+      g.fillStyle = on ? '#ff2d2d' : '#ffd23d'; g.strokeStyle = '#000'; g.lineWidth = 3; g.beginPath(); g.arc(e.x, by, br, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.font = `900 ${Math.round(br * 1.6)}px Rubik, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = on ? '#fff' : '#000'; g.fillText('!', e.x, by + 1);
     }
     if (e.slow) aura(e.x, e.y, size * 0.5, '#8fd8ff', 0.45);
     if (!d.boss && e.hp < e.maxHp) { g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(e.x - 16, e.y - size / 2 - 8, 32, 4); g.fillStyle = e.elite ? '#ffc531' : '#ff5d5d'; g.fillRect(e.x - 16, e.y - size / 2 - 8, 32 * e.hp / e.maxHp, 4); }
@@ -691,7 +720,7 @@ function drawWorld(now, dt) {
         break;
       case 4: // spear / arrow
         aura(px - Math.cos(ang) * 8, py - Math.sin(ang) * 8, r * 2.2, colorOf(owner), 0.5);
-        tileRot(107, px, py, Math.max(24, r * 4), ang + Math.PI / 2);
+        tileRot(WEAPONS.spear?.spr ?? 131, px, py, Math.max(24, r * 4), ang + Math.PI / 2);
         break;
       default: { const c = colorOf(owner); aura(px, py, r * 3, c, 0.9); g.fillStyle = isRich() ? '#fff' : c; g.beginPath(); g.arc(px, py, r * (isRich() ? 0.55 : 0.8), 0, Math.PI * 2); g.fill(); }
     }
@@ -705,13 +734,21 @@ function drawWorld(now, dt) {
       g.save(); g.globalAlpha = (1 - t) * 0.9; g.strokeStyle = f.color; g.lineWidth = f.width * (1 - t * 0.6);
       g.beginPath(); g.arc(f.x, f.y, rr, 0, Math.PI * 2); g.stroke();
       g.globalAlpha = (1 - t) * 0.18; g.fillStyle = f.color; g.fill(); g.restore();
+    } else if (f.k === 'bolt') { // chain lightning: a jagged line between the two monsters
+      g.save(); g.globalAlpha = 1 - t; g.strokeStyle = '#bfe6ff'; g.lineWidth = 3; g.lineJoin = 'round'; g.beginPath(); g.moveTo(f.x, f.y);
+      for (let j = 1; j < 6; j++) { const k = j / 6; g.lineTo(f.x + (f.x2 - f.x) * k + (Math.random() - 0.5) * 18, f.y + (f.y2 - f.y) * k + (Math.random() - 0.5) * 18); }
+      g.lineTo(f.x2, f.y2); g.stroke(); g.lineWidth = 1.2; g.strokeStyle = '#fff'; g.stroke(); g.restore();
+      aura(f.x2, f.y2, 22, '#8fd8ff', 0.8 * (1 - t));
     } else if (f.k === 'slash') {
       const followMe = f.id === myId && me && !me.dead, x = followMe ? me.x : f.x, y = followMe ? me.y : f.y;
-      const tex = isRich() ? slashTex(Math.min(3, Math.floor(t * 4)), f.color) : null;
+      // slash_2 is an arc bulging to +x (thin, sword); slash_1 bulges to +y (thick, axe)
+      const ti = f.arc > 1.4 ? 1 : 2, tex = isRich() ? slashTex(ti, f.color) : null;
       if (tex) {
-        const sz = f.r * 2.3;
-        g.save(); g.globalAlpha = 1 - t * 0.6; g.globalCompositeOperation = 'lighter'; g.translate(x, y); g.rotate(f.a);
-        g.scale(1, Math.max(0.6, Math.min(1.5, f.arc / 1.1))); g.drawImage(tex, -sz / 2, -sz / 2, sz, sz); g.restore();
+        const sz = f.r * (1.5 + 0.25 * t), fwd = f.r * (0.45 + 0.15 * t) - (ti === 1 ? sz * 0.28 : 0);
+        g.save(); g.globalAlpha = 1 - t * t; g.globalCompositeOperation = 'lighter'; g.translate(x, y); g.rotate(f.a - (ti === 1 ? Math.PI / 2 : 0));
+        if (ti === 1) g.translate(0, fwd); else g.translate(fwd, 0);
+        if (ti === 1) g.scale(Math.max(0.8, Math.min(1.5, f.arc / 1.7)), 1); else g.scale(1, Math.max(0.8, Math.min(1.5, f.arc / 1.1)));
+        g.drawImage(tex, -sz / 2, -sz / 2, sz, sz); g.drawImage(tex, -sz / 2, -sz / 2, sz, sz); g.restore();
       } else { // vector arc sweeping across
         const from = f.a - f.arc, to = f.a - f.arc + 2 * f.arc * Math.min(1, t * 1.6);
         g.save(); g.globalAlpha = 1 - t; g.strokeStyle = f.color; g.lineCap = 'round';
@@ -796,7 +833,7 @@ function renderHud() {
   const s = lastSnap, row = myRow();
   const hearts = row ? Array.from({ length: Math.ceil(row[5] / 2) }, (_, i) => (row[4] >= (i + 1) * 2 ? '❤️' : row[4] === i * 2 + 1 ? '💔' : '🖤')).join('') : '';
   const boss = foes.find(e => ENEMIES[e.type]?.boss);
-  const items = (s?.me?.items || []).filter(it => ITEMS[it]).map(it => `<span class="r${ITEMS[it].r || 0}" title="${esc(ITEMS[it].name)}">${tileIcon(ITEMS[it].spr, 22)}</span>`).join('');
+  const items = (s?.me?.items || []).filter(it => ITEMS[it]).map(it => `<span class="r${ITEMS[it].r || 0}" title="${esc(ITEMS[it].name)}">${itemIconHtml(ITEMS[it], 22)}</span>`).join('');
   const h = hero(row?.[11] ?? ui.hero), wk = s?.me?.w ?? row?.[14], w = WEAPONS[wk];
   const alive = row && row[6] && meta.phase === 'play';
   const abReady = row?.[15] ?? 1, ready = abReady >= 1, abLeft = s?.me?.ab?.cd ?? 0;
@@ -805,7 +842,7 @@ function renderHud() {
   const godOn = s?.me?.god || row?.[18];
   const html = `
     <div class="ar-top">
-      <span class="dg-btns"><button class="ar-x" data-act="quit">✕</button> <button class="ar-x" data-act="sound">${sfxSettings.sound ? '🔊' : '🔇'}</button>${isAdmin() ? ` <button class="ar-x dg-adm" data-act="admin">⚙️</button>` : ''}</span>
+      <span class="dg-btns"><button class="ar-x" data-act="quit">✕</button> <button class="ar-x" data-act="sound">${sfxSettings.sound ? '🔊' : '🔇'}</button>${isAdmin() && !adminOpen ? ` <button class="ar-x dg-adm" data-act="admin">⚙️</button>` : ''}</span>
       <div class="ar-time">⬇️ ${s?.fl ?? 1}/3 · 🪙 ${s?.coins ?? 0}${s?.daily || meta.run?.daily ? ` · 🗓️ ${s?.score ?? 0}` : ''}</div>
       <div class="dg-hearts">${hearts}${godOn ? ' <b class="dg-god">GOD</b>' : ''}<small class="ar-ping">📶 ${Math.round(rtt)}</small></div>
     </div>
@@ -862,13 +899,12 @@ function pickHomeHero(i) { ui.hero = i; store.set('dungeon-hero', String(i)); re
 function renderHome() {
   const best = Number(store.get('dungeon-best')) || 0;
   if (menus && !isUnlockedSafe(ui.hero)) ui.hero = 0;
-  const gemsN = menus ? menus.gems() : 0;
   $app.innerHTML = `
     <div class="panel home">
       <a class="ar-back" href="./${debugOn ? '?debug=1' : ''}">→ לכל המשחקים</a>
       <h1>המבוך <span>🐉🗝️</span></h1>
       <p class="sub">ירדו 3 קומות במבוך שנבנה מחדש בכל פעם: מפלצות, חנויות, חדרים סודיים, אוצרות שמשדרגים אתכם, ובוס בסוף כל קומה. לבד או עם עד 3 חברים.</p>
-      ${best ? `<p class="dg-best">${best >= 4 ? '🏆 כבר ניצחתם את המבוך!' : `🏅 השיא שלכם: קומה ${best}`}${menus ? ` · ${uiImg('gem', '💎', 'sm')} ${gemsN}` : ''}</p>` : menus && gemsN ? `<p class="dg-best">${uiImg('gem', '💎', 'sm')} ${gemsN} אבני חן</p>` : ''}
+      ${best ? `<p class="dg-best">${best >= 4 ? '🏆 כבר ניצחתם את המבוך!' : `🏅 השיא שלכם: קומה ${best}`}</p>` : ''}
       ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
       <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
       <div class="dg-pick-title">בחרו גיבור/ה</div>
@@ -876,10 +912,10 @@ function renderHome() {
       ${ui.joinCode ? `<button class="primary" data-act="join">הצטרף לחדר ${esc(ui.joinCode)}</button><div class="or">או</div>` : ''}
       <button class="${ui.joinCode ? '' : 'primary'}" data-act="solo" ${ui.busy ? 'disabled' : ''}>⚔️ לשחק לבד</button>
       <button data-act="create" ${ui.busy ? 'disabled' : ''}>👥 חדר עם חברים</button>
-      <button class="dg-daily-btn" data-act="daily" ${ui.busy ? 'disabled' : ''}>${uiImg('calendar', '🗓️', 'sm')} הריצה היומית <small>אותו מבוך לכולם היום</small></button>
+      ${menus ? '' : `<button class="dg-daily-btn" data-act="daily" ${ui.busy ? 'disabled' : ''}>🗓️ הריצה היומית <small>אותו מבוך לכולם היום</small></button>`}
       <div class="or">או הצטרף עם קוד</div>
       <div class="row"><input id="code" maxlength="4" value="${esc(ui.joinCode)}" placeholder="קוד חדר" dir="ltr"><button data-act="join" ${ui.busy ? 'disabled' : ''}>הצטרף</button></div>
-      <div id="dailyBoard" class="dg-board">${menus ? menus.dailyHtml(ui.dailyState) : ''}</div>
+      <div id="dailyBoard" class="dg-board">${menus ? menus.dailyHtml(ui.dailyState || { loading: true }) : ''}</div>
       <details class="rules"><summary>איך משחקים?</summary><ul>
         <li><b>שליטה:</b> בטלפון – אגודל שמאל לזוז, אגודל ימין לכוון ולתקוף (נגיעה בלי לגרור תוקפת את המפלצת הקרובה). במחשב – WASD, עכבר ולחיצה. 💨 זינוק (Shift) מתחמק מפגיעות, ✨ כוח מיוחד (Q או הכפתור) לכל גיבור.</li>
         <li><b>גיבורים ונשק:</b> לכל גיבור כוח משלו ונשק פותח. נשקים על הרצפה מחליפים את מה שביד: חרב וגרזן מכים מקרוב, פטיש עושה גל הלם, שרביטים וחניתות יורים.</li>
@@ -894,7 +930,8 @@ function renderHome() {
   bindPicker(document.getElementById('heroPick'), pickHomeHero, () => renderHome());
   if (menus && Date.now() - ui.dailyAt > 60000) {
     ui.dailyAt = Date.now();
-    menus.loadDaily(SERVER).then(st => { ui.dailyState = st; const el = document.getElementById('dailyBoard'); if (el && ui.screen === 'home') el.innerHTML = menus.dailyHtml(st); }).catch(() => {});
+    const show = st => { ui.dailyState = st; const el = document.getElementById('dailyBoard'); if (el && ui.screen === 'home') el.innerHTML = menus.dailyHtml(st); };
+    menus.loadDaily(SERVER).then(show).catch(() => { show({ error: true }); ui.dailyAt = 0; });
   }
 }
 function isUnlockedSafe(i) { try { return !menus || menus.isUnlocked(i); } catch { return true; } }
@@ -949,10 +986,16 @@ document.addEventListener('click', async e => {
     case 'sound': toggleSfx('sound'); return;
     case 'gfx': setGfxMode(gfxMode() === 'rich' ? 'simple' : 'rich'); return render();
     case 'admin':
-      if (menus && isAdmin()) menus.openAdminPanel({ send, ITEMS, ITEM_LIST, WEAPONS, WEAPON_LIST, getState: () => ({ snap: lastSnap, me: myRow(), meta }) });
+      if (menus && isAdmin()) { adminOpen = true; hudKey = ''; menus.openAdminPanel({ send: adminSend, ITEMS, ITEM_LIST, WEAPONS, WEAPON_LIST, getState: () => ({ god: !!(lastSnap?.me?.god || myRow()?.[18]), speed: adminLocal.speed, dmg: adminLocal.dmg, coins: lastSnap?.coins ?? 0 }) }); }
       return;
   }
 });
+
+// admin: snapshots only carry god, so the speed / dmg toggles are tracked here
+let adminOpen = false;
+const adminLocal = { speed: false, dmg: false };
+function adminSend(m) { if (m?.c === 'speed' || m?.c === 'dmg') adminLocal[m.c] = !adminLocal[m.c]; send(m); }
+function closeAdmin() { if (adminOpen) { try { menus?.closeAdminPanel?.(); } catch {} } adminOpen = false; adminLocal.speed = adminLocal.dmg = false; }
 
 // ---------- main loop ----------
 let prev = performance.now(), hudAt = 0;

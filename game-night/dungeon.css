@@ -4,7 +4,7 @@ body.dungeon #game { background: #0c0a10; }
 .dg-hearts { background: rgba(0,0,0,.45); padding: 3px 10px; border-radius: 999px; font-size: .95rem; letter-spacing: -1px; text-align: center; }
 .dg-hearts .ar-ping { letter-spacing: 0; }
 .dg-items { position: absolute; top: calc(max(8px, env(safe-area-inset-top)) + 48px); left: 10px; display: flex; flex-wrap: wrap; gap: 3px; max-width: 45vw; }
-.dg-items span { background: rgba(0,0,0,.45); border-radius: 6px; padding: 2px; display: inline-flex; }
+.dg-items > span { background: rgba(0,0,0,.45); border-radius: 6px; padding: 2px; display: inline-flex; }
 .dg-boss { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 6px); left: 50%; transform: translateX(-50%); width: min(70vw, 420px); text-align: center; font-weight: 800; text-shadow: 0 2px 4px #000; }
 .dg-boss .bar { height: 12px; background: rgba(0,0,0,.6); border-radius: 999px; overflow: hidden; margin-top: 4px; border: 2px solid rgba(255,255,255,.3); }
 .dg-boss .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff3b3b, #ff8a3d); transition: width .2s; }
@@ -12,3 +12,44 @@ body.dungeon #game { background: #0c0a10; }
 .dg-best { font-weight: 700; color: var(--accent); }
 .dg-team li { display: flex; align-items: center; gap: 6px; }
 .dg-team small { opacity: .7; }
+/* v2 */
+.dg-items > span.r1 { box-shadow: inset 0 0 0 2px #5aa9ff; }
+.dg-items > span.r2 { box-shadow: inset 0 0 0 2px #ffc531, 0 0 8px rgba(255,197,49,.6); }
+.dg-items .dg-weapon { gap: 3px; align-items: center; padding: 2px 7px 2px 4px; border: 2px solid rgba(255,255,255,.35); font-weight: 700; }
+.dg-items .dg-weapon small { font-size: .7rem; }
+.dg-iic { display: inline-flex; }
+.dg-uiimg { display: inline-grid; place-items: center; position: relative; vertical-align: middle; }
+.dg-uiimg img { width: 100%; height: 100%; object-fit: contain; grid-area: 1/1; }
+.dg-uiimg b { grid-area: 1/1; font-weight: 400; }
+.dg-uiimg img + b { display: none; }
+.dg-uiimg.sm { width: 1.2em; height: 1.2em; }
+.dg-god { color: #ffd23d; font-size: .7rem; letter-spacing: 0; text-shadow: 0 0 6px #ff9a00; }
+/* ability: a ring that fills while it recharges */
+.dg-ab { position: absolute; right: calc(max(18px, env(safe-area-inset-right)) + 78px); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 112px); width: 64px; height: 64px; border-radius: 50%; border: 0; padding: 0; min-height: 0; color: #fff;
+  background: conic-gradient(var(--c, #ffd27a) calc(var(--p, 1) * 360deg), rgba(0,0,0,.5) 0); display: grid; place-items: center; }
+.dg-ab::before { content: ''; position: absolute; inset: 5px; border-radius: 50%; background: rgba(20,16,30,.82); }
+.dg-ab .dg-uiimg { position: relative; width: 38px; height: 38px; font-size: 1.7rem; }
+.dg-ab.cd .dg-uiimg { opacity: .45; filter: grayscale(.6); }
+.dg-ab.ready { box-shadow: 0 0 14px var(--c, #ffd27a); animation: dgAbPulse 1.4s ease-in-out infinite; }
+.dg-ab small { position: absolute; bottom: 3px; font-size: .62rem; font-weight: 800; text-shadow: 0 1px 2px #000; }
+.dg-ab.cd small { bottom: auto; font-size: 1.1rem; }
+@keyframes dgAbPulse { 50% { box-shadow: 0 0 22px var(--c, #ffd27a); } }
+@media (max-height: 460px) { /* phone landscape: keep the buttons low */
+  .ar-dash { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px); width: 58px; height: 58px; }
+  .dg-ab { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 20px); right: calc(max(18px, env(safe-area-inset-right)) + 70px); width: 58px; height: 58px; }
+  .dg-boss { width: min(46vw, 360px); }
+}
+.dg-boss.p2 .bar { border-color: #ff3b3b; box-shadow: 0 0 10px #ff3b3b; }
+.dg-boss.p2 b { color: #ff9a8a; }
+.dg-score { font-size: 1.3rem; font-weight: 800; text-align: center; }
+.dg-gems { text-align: center; font-weight: 800; color: #3d8bff; font-size: 1.1rem; }
+.dg-gems small { color: var(--muted, #777); font-weight: 600; }
+.dg-cheat { color: #c05; }
+.dg-endboard { max-height: 34vh; overflow: auto; margin-bottom: 8px; }
+.dg-endboard .dgm-daily-play { display: none; }
+.dg-pick-title { font-weight: 700; margin: 12px 0 4px; }
+.dg-board { margin-top: 12px; }
+.dg-heroes-fallback { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.dg-heroes-fallback button { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.dg-heroes-fallback button.sel { outline: 3px solid var(--accent, #ffd27a); }
+.dg-daily-btn small { display: block; font-size: .7rem; opacity: .75; }
