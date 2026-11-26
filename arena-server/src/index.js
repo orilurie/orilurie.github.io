@@ -7,7 +7,7 @@ import {
   COLORS, MAPS, BUFF_TIME, BULLET_SPEED, move, collide, insideWall, blocked, segDist, shotBullets, stepBullet,
   canSee, STEP, NEAR, INTERP_MS, GRENADE, PROPS, propRect, WEAPONS, WEAPON_LIST, DASH, BUSH_REVEAL, inBush,
 } from '../../game-night/arena-core.js';
-import { DungeonSim, ENEMY_LIST, ITEM_LIST, roomAt as dRoomAt, MAX_PLAYERS as D_MAX, TICK as D_TICK, collide as dCollide } from '../../game-night/dungeon-core.js';
+import { DungeonSim, ENEMY_LIST, HEROES, roomAt as dRoomAt, MAX_PLAYERS as D_MAX, TICK as D_TICK, collide as dCollide } from '../../game-night/dungeon-core.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Cache-Control': 'no-store' };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -23,6 +23,10 @@ export default {
     if (url.pathname === '/api/quick' || url.pathname === '/api/new' || url.pathname === '/api/check') {
       const r = await mm.fetch(`https://mm${url.pathname.slice(4)}${url.search}`);
       return json(await r.json());
+    }
+    if (url.pathname === '/api/daily' && req.method === 'GET') { // the dungeon's daily-run leaderboard
+      const r = await mm.fetch(`https://mm/daily${url.search}`);
+      return json(await r.json(), r.status);
     }
     const dm = url.pathname.match(/^\/dws\/([A-Z]{4})$/); // the dungeon game
     if (dm) {
@@ -46,8 +50,30 @@ export default {
 };
 
 // ---------------------------------------------------------------------------------------------
+const utcDay = (t = Date.now()) => { const d = new Date(t); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); };
+const validDay = d => /^\d{8}$/.test(String(d)) && +String(d).slice(4, 6) >= 1 && +String(d).slice(4, 6) <= 12 && +String(d).slice(6) >= 1 && +String(d).slice(6) <= 31;
+const DAILY_TOP = 20;
+
 export class Matchmaker {
-  constructor(state) { this.rooms = new Map(); } // code -> { pub, humans, phase, mode, t }
+  constructor(state) { this.rooms = new Map(); this.storage = state.storage; } // rooms: code -> { pub, humans, phase, mode, t }
+
+  // המבוך daily leaderboard: best result per name per UTC day, top 20, kept in DO storage under daily:YYYYMMDD.
+  // Only the Dungeon object posts here (the worker never routes /daily-add from outside).
+  async dailyAdd(r) {
+    const d = Number(r?.d), name = String(r?.name ?? '').trim().slice(0, 16);
+    const int = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v)) || 0));
+    if (!validDay(d) || !name) return false;
+    const row = { name, score: int(r.score, 1e7), floor: int(r.floor, 99), won: !!r.won, kills: int(r.kills, 1e5) };
+    const key = `daily:${d}`;
+    const top = (await this.storage.get(key)) || [];
+    const old = top.find(x => x.name === name);
+    if (old && old.score >= row.score) return true;
+    const next = top.filter(x => x.name !== name);
+    next.push(row);
+    next.sort((a, b) => b.score - a.score);
+    await this.storage.put(key, next.slice(0, DAILY_TOP));
+    return true;
+  }
 
   fresh(r) { return Date.now() - r.t < 25000; }
 
@@ -59,6 +85,17 @@ export class Matchmaker {
       if (r.closed) this.rooms.delete(r.code);
       else this.rooms.set(r.code, { ...r, t: Date.now() });
       return json({ ok: true });
+    }
+    if (url.pathname === '/daily-add' && req.method === 'POST') {
+      let r;
+      try { r = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+      return json({ ok: await this.dailyAdd(r) });
+    }
+    if (url.pathname === '/daily') {
+      const q = url.searchParams.get('d');
+      const d = q ? Number(q) : utcDay();
+      if (!validDay(d)) return json({ error: 'bad day' }, 400);
+      return json({ d, top: (await this.storage.get(`daily:${d}`)) || [] });
     }
     if (url.pathname === '/check') {
       const r = this.rooms.get((url.searchParams.get('code') || '').toUpperCase());
@@ -1000,15 +1037,30 @@ export class Room {
 
 // ---------------------------------------------------------------------------------------------
 // המבוך: a co-op dungeon run for 1–4 players. Lobby → run (DungeonSim) → won / lost → again.
+// A "daily" room is a solo run on the seed of the UTC day; a clean (no admin) result goes to the daily leaderboard.
+const ADMIN_NAME = 'אורי מורי';
+const isAdminName = name => String(name || '').trim() === ADMIN_NAME;
+const ADMIN_CMDS = new Set(['god', 'coins', 'addcoins', 'heal', 'maxhp', 'item', 'weapon', 'killroom', 'nextfloor', 'reveal', 'speed', 'dmg', 'reviveall']);
+const SHOT_KINDS = { bolt: 0, fire: 1, fireball: 1, ice: 2, dagger: 3, daggers: 3, spear: 4, arrow: 4 };
+const validHero = h => Number.isInteger(h) && h >= 0 && h < (HEROES?.length || 4);
+// admin values: a number (clamped) or a short key such as an item / weapon name
+const cleanAdminVal = v => {
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.max(-1e6, Math.min(1e6, Math.round(v))) : 0;
+  if (typeof v === 'string') { const s = v.slice(0, 24).replace(/[^a-zA-Z0-9_:-]/g, ''); return /^-?\d+$/.test(s) ? Math.max(-1e6, Math.min(1e6, +s)) : s; }
+  return null;
+};
+
 export class Dungeon {
   constructor(state, env) {
     this.env = env;
     this.code = null;
-    this.players = new Map(); // id -> { id, name, on }
+    this.players = new Map(); // id -> { id, name, on, hero, b }
     this.sockets = new Map();
     this.host = null;
     this.phase = 'lobby'; // lobby | play | end
     this.sim = null;
+    this.daily = false; // this room plays the daily run
+    this.posted = false; // daily result already sent for the current run
     this.events = [];
     this.timer = null;
     this.tickNo = 0;
@@ -1021,6 +1073,7 @@ export class Dungeon {
     server.addEventListener('message', e => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
+      if (!msg || typeof msg !== 'object') return;
       try { this.onMessage(server, msg); } catch (err) { try { server.send(JSON.stringify({ t: 'err', m: 'שגיאת שרת' })); } catch {} }
     });
     const gone = () => this.onClose(server);
@@ -1032,11 +1085,12 @@ export class Dungeon {
 
   send(ws, m) { try { ws.send(JSON.stringify(m)); } catch {} }
   broadcast(m) { const s = JSON.stringify(m); for (const ws of this.sockets.keys()) { try { ws.send(s); } catch {} } }
+  mm() { return this.env.MM.get(this.env.MM.idFromName('main')); }
 
   report(closed = false) {
     if (!this.code) return;
     const body = JSON.stringify({ code: this.code, pub: false, humans: [...this.players.values()].filter(p => p.on).length, phase: this.phase, mode: 'dungeon', closed });
-    this.env.MM.get(this.env.MM.idFromName('main')).fetch('https://mm/report', { method: 'POST', body }).catch(() => {});
+    this.mm().fetch('https://mm/report', { method: 'POST', body }).catch(() => {});
   }
 
   onMessage(ws, msg) {
@@ -1049,8 +1103,29 @@ export class Dungeon {
       if (!sp) return;
       sp.input = { a: Number(msg.a) || 0, f: !!msg.f };
       if (Number.isFinite(msg.r)) sp.rtt = Math.max(0, Math.min(400, msg.r));
-      if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) this.sim.applyCmd(sp, c);
+      if (Array.isArray(msg.c)) for (const c of msg.c.slice(0, 40)) if (Array.isArray(c)) this.sim.applyCmd(sp, c);
+      // ability presses: b is a counter the client bumps on each press. The first value after a
+      // (re)connect, or a counter that went backwards (client reloaded), only sets the baseline.
+      if (Number.isInteger(msg.b) && msg.b >= 0) {
+        if (p.b == null || msg.b < p.b) p.b = msg.b;
+        else if (msg.b > p.b) {
+          p.b = msg.b;
+          if (this.phase === 'play' && this.sim.phase === 'play' && sp.alive) this.sim.useAbility(sp);
+        }
+      }
       return;
+    }
+    if (msg.t === 'hero') {
+      const h = Number(msg.h);
+      if (validHero(h) && this.phase !== 'play') { p.hero = h; this.sendMeta(); }
+      return;
+    }
+    if (msg.t === 'adm') {
+      if (!isAdminName(p.name) || !this.sim || this.phase !== 'play') return;
+      const sp = this.sim.players.get(id), c = String(msg.c || '');
+      if (!sp || !ADMIN_CMDS.has(c)) return;
+      this.sim.admin(sp, c, cleanAdminVal(msg.v));
+      return this.sendMeta(); // run.cheated changed
     }
     if (msg.t === 'start' && id === this.host && this.phase !== 'play') return this.startRun();
     if (msg.t === 'lobby' && id === this.host && this.phase === 'end') { this.phase = 'lobby'; this.sim = null; return this.sendMeta(); }
@@ -1059,28 +1134,33 @@ export class Dungeon {
   join(ws, msg) {
     const id = String(msg.id || '').slice(0, 20), name = String(msg.name || '').trim().slice(0, 16) || 'שחקן';
     if (!id) return;
+    const hero = Number(msg.hero);
+    if (msg.daily && this.players.size === 0 && this.phase === 'lobby') this.daily = true;
     let p = this.players.get(id);
     if (!p) {
-      if (this.players.size >= D_MAX) { this.send(ws, { t: 'err', m: 'החדר מלא', fatal: true }); return ws.close(1000, 'full'); }
-      p = { id, name, on: true };
+      // the daily run is solo
+      if (this.players.size >= D_MAX || (this.daily && this.players.size >= 1)) { this.send(ws, { t: 'err', m: 'החדר מלא', fatal: true }); return ws.close(1000, 'full'); }
+      p = { id, name, on: true, hero: validHero(hero) ? hero : null, b: null };
       this.players.set(id, p);
       // joining a run in progress: appear next to a friend
       if (this.sim && this.phase === 'play' && !this.sim.players.has(id)) {
-        const sp = this.sim.newPlayer({ id, name }, this.sim.players.size);
+        const i = this.sim.players.size;
+        const sp = this.sim.newPlayer({ id, name, hero: validHero(p.hero) ? p.hero : i % 4 }, i);
         const friend = this.sim.alivePlayers()[0];
         if (friend) { sp.x = friend.x + 30; sp.y = friend.y; dCollide(sp, this.sim.solid); }
         this.sim.players.set(id, sp);
       }
-    }
+    } else if (validHero(hero) && this.phase !== 'play') p.hero = hero;
     for (const [w, pid] of this.sockets) if (pid === id && w !== ws) { this.sockets.delete(w); try { w.close(1000, 'replaced'); } catch {} }
     p.name = name; p.on = true; p.off = 0;
+    p.b = null; // new connection: the next ability counter is only a baseline
     this.sockets.set(ws, id);
     if (!this.host || !this.players.get(this.host)?.on) this.host = id;
     const sp = this.sim?.players.get(id);
     if (sp) sp.lastSeq = 0;
     this.send(ws, { t: 'welcome', id, code: this.code });
     this.sendMeta();
-    if (msg.solo && this.phase === 'lobby' && this.players.size === 1) this.startRun(); // "play alone" starts at once
+    if ((msg.solo || msg.daily) && this.phase === 'lobby' && this.players.size === 1) this.startRun(); // "play alone" starts at once
     this.report();
   }
 
@@ -1099,10 +1179,26 @@ export class Dungeon {
   startRun() {
     const ps = [...this.players.values()].filter(p => p.on);
     if (!ps.length) return;
-    this.sim = new DungeonSim(ps.map(p => ({ id: p.id, name: p.name })), Math.floor(Math.random() * 1e9), ev => this.events.push(ev));
+    const seed = this.daily ? utcDay() : Math.floor(Math.random() * 1e9);
+    this.day = this.daily ? seed : null;
+    this.sim = new DungeonSim(ps.map((p, i) => ({ id: p.id, name: p.name, hero: validHero(p.hero) ? p.hero : i % 4 })), seed, ev => this.events.push(ev), { daily: this.daily });
+    this.posted = false;
     this.phase = 'play';
     this.sendMeta();
     this.report();
+  }
+
+  score() { try { return Math.max(0, Math.round(this.sim?.score?.() || 0)); } catch { return 0; } }
+
+  // a daily run that ended without admin help goes to the leaderboard (once per run)
+  postDaily() {
+    const sim = this.sim;
+    if (!this.daily || !sim || this.posted || sim.cheated) return;
+    this.posted = true;
+    const p = [...sim.players.values()][0];
+    if (!p) return;
+    const body = JSON.stringify({ d: this.day, name: this.players.get(p.id)?.name || p.name, score: this.score(), floor: sim.floor, won: sim.phase === 'won', kills: sim.kills });
+    this.mm().fetch('https://mm/daily-add', { method: 'POST', body }).catch(() => {});
   }
 
   loop() {
@@ -1118,48 +1214,56 @@ export class Dungeon {
         for (const sp of this.sim.players.values()) if (!this.players.get(sp.id)?.on) sp.input = { a: sp.aim, f: false };
         this.sim.tick();
         this.tickNo++;
-        if (this.sim.phase !== 'play') { this.phase = 'end'; this.sendSnapshot(); this.sendMeta(); this.report(); }
+        if (this.sim.phase !== 'play') { this.phase = 'end'; this.postDaily(); this.sendSnapshot(); this.sendMeta(); this.report(); }
         else this.sendSnapshot();
       }
     }
     if (this.sockets.size === 0) {
       this.emptySince ||= now;
-      if (now - this.emptySince > 60000) { clearInterval(this.timer); this.timer = null; this.players.clear(); this.sim = null; this.phase = 'lobby'; this.report(true); }
+      if (now - this.emptySince > 60000) { clearInterval(this.timer); this.timer = null; this.players.clear(); this.sim = null; this.phase = 'lobby'; this.daily = false; this.report(true); }
     } else this.emptySince = 0;
   }
 
   sendMeta() {
     const sim = this.sim;
     this.broadcast({
-      t: 'room', code: this.code, host: this.host, phase: this.phase,
-      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, on: p.on, hero: sim?.players.get(p.id)?.hero ?? null })),
-      run: sim ? { seed: sim.seed, floor: sim.floor, result: sim.phase, kills: sim.kills, coins: sim.coins, t: Math.round(sim.t) } : null,
+      t: 'room', code: this.code, host: this.host, phase: this.phase, daily: this.daily,
+      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, on: p.on, hero: sim?.players.get(p.id)?.hero ?? p.hero ?? null, ...(isAdminName(p.name) ? { admin: true } : {}) })),
+      run: sim ? { seed: sim.seed, floor: sim.floor, result: sim.phase, kills: sim.kills, coins: sim.coins, t: Math.round(sim.t), daily: this.daily, score: this.score(), cheated: !!sim.cheated } : null,
     });
   }
 
   sendSnapshot() {
-    const sim = this.sim, r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+    const sim = this.sim, r1 = v => Math.round((v || 0) * 10) / 10, r2 = v => Math.round((v || 0) * 100) / 100;
     const rooms = new Set([...sim.players.values()].filter(p => p.alive).map(p => dRoomAt(sim.layout, p.x, p.y)));
     const ack = {};
     const players = [...sim.players.values()].map(p => {
       ack[p.id] = p.lastSeq;
-      return [p.id, r1(p.x), r1(p.y), r2(p.aim), p.hp, p.st.maxHp, p.alive ? 1 : 0, sim.t < p.inv ? 1 : 0, p.dashT > 0 ? 1 : 0, r1(p.vx || 0), r1(p.vy || 0), p.hero, p.st.orbit, Math.round(p.st.speed)];
+      const max = HEROES?.[p.hero]?.abCd || 1;
+      return [p.id, r1(p.x), r1(p.y), r2(p.aim), p.hp, p.st.maxHp, p.alive ? 1 : 0, sim.t < p.inv ? 1 : 0, p.dashT > 0 ? 1 : 0, r1(p.vx), r1(p.vy), p.hero, p.st.orbit, Math.round(p.st.speed),
+        p.weapon || null, r2(Math.max(0, Math.min(1, 1 - (p.abCd || 0) / max))), sim.t < (p.shieldT || 0) ? 1 : 0, r2(p.revive), p.god ? 1 : 0];
     });
     const base = {
       t: 's', ph: sim.phase, fl: sim.floor, seed: sim.seed, ot: r2(sim.t), ack, p: players,
       rs: sim.rooms.map(r => (r.visited ? 1 : 0) | (r.cleared ? 2 : 0) | (r.locked ? 4 : 0)),
-      e: sim.enemies.filter(e => rooms.has(e.room)).map(e => [e.id, ENEMY_LIST.indexOf(e.type), r1(e.x), r1(e.y), Math.ceil(e.hp), Math.ceil(e.maxHp), sim.t < e.wake ? 1 : 0, sim.t < e.slow ? 1 : 0, e.face]),
-      s: sim.shots.map(s => [s.id, r1(s.x), r1(s.y), r1(s.vx), r1(s.vy), r1(s.r), s.enemy ? 1 : 0, s.owner || null]),
+      so: sim.secretOpen ? 1 : 0, ck: sim.crackHits || 0,
+      e: sim.enemies.filter(e => rooms.has(e.room)).map(e => [e.id, ENEMY_LIST.indexOf(e.type), r1(e.x), r1(e.y), Math.ceil(e.hp), Math.ceil(e.maxHp), sim.t < e.wake ? 1 : 0, sim.t < e.slow ? 1 : 0, e.face,
+        e.elite ? 1 : 0, e.warn ? 1 : 0, e.phase === 2 ? 2 : 1]),
+      s: sim.shots.map(s => [s.id, r1(s.x), r1(s.y), r1(s.vx), r1(s.vy), r1(s.r), s.enemy ? 1 : 0, s.owner || null, typeof s.kind === 'number' ? s.kind : SHOT_KINDS[s.kind] ?? 0]),
       u: sim.pickups.map(u => [u.id, u.type, r1(u.x), r1(u.y)]),
-      ped: sim.pedestals.map(d => [d.id, ITEM_LIST.indexOf(d.item), r1(d.x), r1(d.y), d.set]),
+      ped: sim.pedestals.map(d => [d.id, d.code ?? d.item, r1(d.x), r1(d.y), d.set ?? null, d.price || 0, d.curse ? 1 : 0]),
+      ch: (sim.chests || []).map(c => [c.id, r1(c.x), r1(c.y), c.kind === 1 || c.kind === 'gold' ? 1 : 0, c.open ? 1 : 0]),
       td: sim.trapdoor ? [r1(sim.trapdoor.x), r1(sim.trapdoor.y)] : null,
       ev: this.events,
-      coins: sim.coins, kills: sim.kills,
+      coins: sim.coins, kills: sim.kills, score: this.score(), daily: this.daily ? 1 : 0, cheated: sim.cheated ? 1 : 0,
     };
     this.events = [];
     for (const [ws, id] of this.sockets) {
       const sp = sim.players.get(id);
-      const me = sp ? { items: sp.items, st: { dmg: Math.round(sp.st.dmg), cd: r2(sp.st.cd), shots: sp.st.shots, life: r2(sp.st.life), size: r1(sp.st.size) }, dc: r1(Math.max(0, sp.dashCd)), took: sp.tookSets || [] } : null;
+      const me = sp ? {
+        items: sp.items, st: { dmg: Math.round(sp.st.dmg), cd: r2(sp.st.cd), shots: sp.st.shots, life: r2(sp.st.life), size: r1(sp.st.size) }, dc: r1(Math.max(0, sp.dashCd)), took: sp.tookSets || [],
+        w: sp.weapon || null, ab: { cd: r1(Math.max(0, sp.abCd || 0)), max: HEROES?.[sp.hero]?.abCd || 0 }, god: sp.god ? 1 : 0,
+      } : null;
       try { ws.send(JSON.stringify({ ...base, me })); } catch {}
     }
   }
