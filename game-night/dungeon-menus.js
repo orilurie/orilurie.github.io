@@ -1,6 +1,6 @@
 // המבוך v2 – menus: gems & hero unlocks, hero picker, daily leaderboard, admin panel.
 // Pure UI helpers; dungeon.js owns the screens and calls into these.
-import * as core from './dungeon-core.js?v=51';
+import * as core from './dungeon-core.js?v=52';
 
 // Fallbacks so the module works even if the core hasn't been updated yet (namespace import never throws on a missing export).
 const FALLBACK_HEROES = [
