@@ -6,3 +6,5 @@ Sounds used by the arena game (זירה). All are CC0 (public domain):
   7 "Gunshot_002" by Brokenphono (344142) · 8 "GUNSHOT.WAV" by erkanozan (51749)
 - everything else: Kenney (www.kenney.nl) – Impact Sounds, Sci-Fi Sounds, Interface Sounds (CC0), converted to mp3
 - dg_*.mp3 (the dungeon game): Kenney RPG Audio, Sci-Fi Sounds, Impact Sounds (CC0)
+- dg_shield, dg_fireball, dg_shock, dg_buy, dg_open, dg_mimic, dg_secret, dg_phase2, dg_revive, dg_warn, dg_unlocked (dungeon v2):
+  Kenney (www.kenney.nl) Sci-Fi Sounds, RPG Audio, Impact Sounds, Interface Sounds, Digital Audio, Music Jingles (all CC0), trimmed/normalized, mono mp3

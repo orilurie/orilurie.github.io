@@ -1,1 +1,5 @@
 Dungeon art: Kenney Tiny Dungeon (CC0), tiles.png is the packed 16x16 tilemap.
+slash_0..3.png: Kenney Particle Pack (CC0), slash_01..04, downscaled to 256 px (white, tinted in code).
+ui/*.png (gem, shield, fire, dagger, bow, gear, crown, calendar, skull): Microsoft Fluent Emoji (3D),
+  MIT license (ui/LICENSE-fluent-emoji.txt), resized to 128 px.
+Kenney assets: www.kenney.nl, Creative Commons Zero (CC0) - see LICENSE-kenney-*.txt.
