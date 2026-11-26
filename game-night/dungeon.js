@@ -5,13 +5,13 @@
 import {
   T, CW, CH, RW, RH, PR, DASH, INTERP_MS, ITEMS, ITEM_LIST, ENEMIES, ENEMY_LIST, MAX_PLAYERS, SHOT_SPEED,
   genFloor, solids, move, roomAt, interior, blocked,
-} from './dungeon-core.js?v=50';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=50';
-import { sound, addSounds } from './arena-audio.js?v=50';
-import * as gfx from './arena-gfx.js?v=50';
-import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=50';
+} from './dungeon-core.js?v=51';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=51';
+import { sound, addSounds } from './arena-audio.js?v=51';
+import * as gfx from './arena-gfx.js?v=51';
+import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=51';
 
-export const VERSION = 50;
+export const VERSION = 51;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');
@@ -62,6 +62,7 @@ const snaps = [];
 let layout = null, layoutKey = '', curSolids = null, lockedKey = '';
 async function api(path) { const r = await fetch(SERVER + path, { cache: 'no-store' }); if (!r.ok) throw new Error('server'); return r.json(); }
 function connect(c, solo) {
+  if (!history.state?.room) history.pushState({ room: 1 }, '', location.href);
   code = c; wantOpen = true; ui.solo = solo; ui.screen = 'connecting'; render(); open();
   history.replaceState(null, '', `?room=${c}${debugOn ? '&debug=1' : ''}${params.get('server') ? '&server=' + encodeURIComponent(SERVER) : ''}`);
 }
@@ -79,6 +80,10 @@ function open() {
 }
 const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
 setInterval(() => send({ t: 'ping', c: performance.now() }), 2000);
+addEventListener('popstate', () => {
+  if (ui.screen !== 'room' && ui.screen !== 'connecting') return;
+  if (confirm('לצאת מהחדר?')) leave(); else history.pushState({ room: 1 }, '', location.href);
+});
 function leave(err = '') {
   wantOpen = false; try { ws?.close(); } catch {}
   ws = null; meta = null; lastSnap = null; snaps.length = 0; layout = null;

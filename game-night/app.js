@@ -1,14 +1,14 @@
-import * as Hathatul from './game.js?v=50';
-import * as Quartets from './quartets.js?v=50';
-import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=50';
-import * as Battleship from './battleship.js?v=50';
-import * as Imposter from './imposter.js?v=50';
-import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=50';
-import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=50';
-import { hostTransport, clientTransport, setNetLog } from './net.js?v=50';
-import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=50';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=50';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=50';
+import * as Hathatul from './game.js?v=51';
+import * as Quartets from './quartets.js?v=51';
+import { renderQuartets, quartetsRulesHtml, quartetsDragTargets, quartetsWhy, playQuartetEvents } from './quartets-ui.js?v=51';
+import * as Battleship from './battleship.js?v=51';
+import * as Imposter from './imposter.js?v=51';
+import { renderImposter, imposterAct, playImposterEvents, imposterRulesHtml } from './imposter-ui.js?v=51';
+import { initBattleship, renderBattleshipHud, syncBattleship, battleshipAct, prepareBattleshipEvents, playBattleshipEvents, battleshipRulesHtml } from './battleship-ui.js?v=51';
+import { hostTransport, clientTransport, setNetLog } from './net.js?v=51';
+import { snapshot, playEvents, turnFx, confetti, emojiFx, STRIP } from './anim.js?v=51';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=51';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=51';
 
 const { POWERS, MIN_PLAYERS, MAX_PLAYERS } = Hathatul;
 // The games this app can host. A room is created for one game; joiners just follow the room.
@@ -19,7 +19,7 @@ const GAMES = {
   imposter: { rules: Imposter, name: 'המתחזה', icon: '🕵️', art: 'detective', blurb: 'כולם יודעים את המילה הסודית – חוץ מהמתחזה. מי משקר?' },
 };
 const EMOJIS = ['😂', '😱', '👏', '🐭', '😡', '🙏'];
-export const VERSION = 50; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
+export const VERSION = 51; // bump on every deploy, together with version.json, the ?v= in index.html and the imports below
 
 // Browsers (especially in-app ones) may serve a cached old page. version.json is fetched
 // fresh; if it's newer, reload once with a changed URL so the new page is fetched.
@@ -392,6 +392,16 @@ const localParam = () => (new URLSearchParams(location.search).has('local') ? { 
 // local + debug: kept when moving between screens (debug is not put in links shared with friends)
 const ownParams = () => ({ ...localParam(), ...(new URLSearchParams(location.search).has('debug') ? { debug: '1' } : {}) });
 const homeUrl = () => location.pathname + (Object.keys(ownParams()).length ? `?${new URLSearchParams(ownParams())}` : '');
+// The phone's back button: from a game's page back to the list; inside a room it asks first.
+let roomGuard = false;
+addEventListener('popstate', () => {
+  if (ui.screen === 'home') { ui.homeView = history.state?.home === 'game' ? 'game' : 'list'; ui.error = ''; return render(); }
+  if (ui.screen === 'lobby' || ui.screen === 'game' || ui.screen === 'connecting') {
+    if (ui.room?.test || confirm('לצאת מהחדר?')) { location.href = homeUrl(); return; }
+    history.pushState({ room: 1 }, ''); // stay
+  }
+});
+function guardRoom() { if (!roomGuard) { roomGuard = true; history.pushState({ room: 1 }, ''); } }
 const randomCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
 
 let toastTimer;
@@ -425,6 +435,7 @@ function render() {
   document.body.classList.remove('bs-on');
   keepAwake();
   if (ui.screen === 'home') return renderHome();
+  guardRoom();
   if (ui.screen === 'connecting') {
     $app.innerHTML = `<div class="panel center"><div class="spinner"></div><p>${ui.connectMsg || 'מתחבר…'}</p>
       <button class="ghost" data-act="cancelJoin">ביטול</button></div>`;
@@ -461,42 +472,64 @@ function render() {
 
 // Shared by both games' screens.
 const headerButtons = () => `
-  ${ui.room.test ? `<button class="ghost" data-act="exitTest">יציאה</button>` : ''}
+  <button class="ghost" data-act="${ui.room.test ? 'exitTest' : 'exitGame'}">יציאה</button>
   <button class="ghost icon-btn" data-act="toggleSound" aria-label="צלילים" title="צלילים">${sfxSettings.sound ? '🔊' : '🔇'}</button>
   <button class="ghost icon-btn" data-act="toggleHaptics" aria-label="רטט" title="רטט">${sfxSettings.haptics ? '📳' : '📴'}</button>
   ${ui.room.test && ui.room.type === 'hathatul' ? `<button class="ghost" data-act="toggleLog">${ui.showLog ? 'הסתר יומן' : 'יומן'}</button>` : ''}`;
 const emojiBar = () => `<div class="emoji-bar" role="group" aria-label="תגובות">${EMOJIS.map(e => `<button class="emoji-btn" data-act="emoji" data-e="${e}">${e}</button>`).join('')}</div>`;
 
 function renderHome() {
-  $app.innerHTML = `
-    <div class="panel home">
-      <div class="brand"><img class="brand-art" src="art/die.png" alt=""><span class="brand-emoji">🎲</span> ערב משחקים</div>
-      <h1>${GAMES[ui.gameType].name} <span>${{ quartets: '🃏♥️', battleship: '🚢💥', imposter: '🕵️🤫' }[ui.gameType] || '🐱🐭'}</span></h1>
-      <div class="game-pick" role="radiogroup" aria-label="בחירת משחק">
-        ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card ${ui.gameType === id ? 'on' : ''}" data-act="pickGame" data-g="${id}" role="radio" aria-checked="${ui.gameType === id}">
+  const tiles = `
+      <div class="game-pick" role="list" aria-label="המשחקים">
+        ${Object.entries(GAMES).map(([id, g]) => `<button class="game-card" data-act="pickGame" data-g="${id}">
           <span class="gc-icon">${g.icon}</span><img class="gc-art" src="art/${g.art}.png" alt=""><b>${g.name}</b></button>`).join('')}
         <a class="game-card gc-dungeon" href="dungeon.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🐉</span><img class="gc-art" src="art/dragon.png" alt=""><b>המבוך</b><small>הרפתקה – לבד או עם חברים</small></a>
         <a class="game-card gc-arena" href="arena.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🔫</span><img class="gc-art" src="art/pistol.png" alt=""><b>זירה</b><small>יריות בזמן אמת</small></a>
-      </div>
-      <p class="sub">${{ battleship: 'משחק אונליין לשני שחקנים.', imposter: 'משחק מילים אונליין ל-3 עד 6 שחקנים.' }[ui.gameType] || 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${GAMES[ui.gameType].blurb}</p>
-      ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
-      <label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>
-      <button class="primary" data-act="create">צור חדר ${GAMES[ui.gameType].name}</button>
-      <div class="or">או הצטרף לחדר קיים (המשחק נקבע לפי החדר)</div>
+      </div>`;
+  const joinBox = `
+      <div class="or">יש לכם קוד חדר? (המשחק נקבע לפי החדר)</div>
       <div class="row">
         <input id="code" maxlength="4" value="${esc(ui.joinCode)}" placeholder="קוד חדר" dir="ltr">
         <button data-act="join">הצטרף</button>
-      </div>
+      </div>`;
+  const nameBox = `<label>השם שלך<input id="name" maxlength="16" value="${esc(ui.name)}" placeholder="למשל: אורי"></label>`;
+  const footer = `
+      ${installHtml()}
+      <button class="ghost gfx-toggle" data-act="gfx">🎨 גרפיקה: ${gfxMode() === 'rich' ? 'מלאה' : 'פשוטה'} <small>(לחצו להחלפה)</small></button>
+      <p class="version">גרסה ${VERSION}</p>`;
+  // 1) all the games
+  if (ui.homeView !== 'game') {
+    $app.innerHTML = `
+    <div class="panel home">
+      <h1 class="home-title"><img class="brand-art big" src="art/die.png" alt=""><span class="brand-emoji">🎲</span> ערב משחקים</h1>
+      <p class="sub">בחרו משחק:</p>
+      ${tiles}
+      ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
+      ${nameBox}
+      ${joinBox}
+      ${footer}
+    </div>`;
+    return;
+  }
+  // 2) one game: create a room, join, rules – with a way back to the list
+  const g = GAMES[ui.gameType];
+  $app.innerHTML = `
+    <div class="panel home">
+      <button class="back-btn" data-act="homeList">→ כל המשחקים</button>
+      <h1 class="game-title"><img class="gc-art-title" src="art/${g.art}.png" alt=""><span class="brand-emoji">${g.icon}</span> ${g.name}</h1>
+      <p class="sub">${{ battleship: 'משחק אונליין לשני שחקנים.', imposter: 'משחק מילים אונליין ל-3 עד 6 שחקנים.' }[ui.gameType] || 'משחק קלפים אונליין ל-2 עד 6 שחקנים.'} ${g.blurb}</p>
+      ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}
+      ${nameBox}
+      <button class="primary" data-act="create">צור חדר ${g.name}</button>
+      ${joinBox}
       ${debugOn ? `<div class="or">או</div>
       <div class="row test-row">
         <button data-act="test">🧪 חדר בדיקה</button>
         <select id="testN" aria-label="מספר שחקנים">${({ battleship: [2], imposter: [3, 4, 5, 6] }[ui.gameType] || [2, 3, 4, 5, 6]).map(n => `<option value="${n}">${n} שחקנים</option>`).join('')}</select>
       </div>
       <p class="hint">בחדר בדיקה משחקים לבד את כל השחקנים, וכל הקלפים גלויים.</p>` : ''}
-      ${installHtml()}
-      <details class="rules"><summary>איך משחקים ${GAMES[ui.gameType].name}?</summary>${{ quartets: quartetsRulesHtml, battleship: battleshipRulesHtml, imposter: imposterRulesHtml }[ui.gameType]?.() || rulesHtml()}</details>
-      <button class="ghost gfx-toggle" data-act="gfx">🎨 גרפיקה: ${gfxMode() === 'rich' ? 'מלאה' : 'פשוטה'} <small>(לחצו להחלפה)</small></button>
-      <p class="version">גרסה ${VERSION}</p>
+      <details class="rules"><summary>איך משחקים ${g.name}?</summary>${{ quartets: quartetsRulesHtml, battleship: battleshipRulesHtml, imposter: imposterRulesHtml }[ui.gameType]?.() || rulesHtml()}</details>
+      ${footer}
     </div>`;
 }
 
@@ -543,6 +576,7 @@ function renderLobby() {
            ${r.players.length < (GAMES[r.type]?.rules.MIN_PLAYERS || MIN_PLAYERS) ? `<p class="sub">מחכים לשחקנים נוספים… (צריך לפחות ${GAMES[r.type]?.rules.MIN_PLAYERS || MIN_PLAYERS})</p>` : ''}`
         : `<p class="sub">מחכים שהמארח/ת יתחיל/ה את המשחק…</p>`}
       <p class="hint">המארח/ת צריך/ה להשאיר את הדף פתוח לאורך כל המשחק.</p>
+      <button class="ghost" data-act="exitGame">→ יציאה מהחדר</button>
     </div>`;
 }
 
@@ -985,7 +1019,19 @@ function onAct(el) {
       ui.gameType = el.dataset.g;
       store.set('hathatul-game', ui.gameType);
       ui.name = document.getElementById('name')?.value.trim() || ui.name;
+      ui.homeView = 'game'; ui.error = '';
+      history.pushState({ home: 'game' }, '');
+      scrollTo(0, 0);
       return render();
+    case 'homeList':
+      ui.name = document.getElementById('name')?.value.trim() || ui.name;
+      if (history.state?.home === 'game') history.back(); else { ui.homeView = 'list'; ui.error = ''; render(); }
+      return;
+    case 'exitGame':
+      if (ui.screen === 'game' && !ui.room?.test && !confirm(ui.room?.isHost ? 'לצאת מהמשחק? (אתם המארחים – המשחק ייסגר לכולם)' : 'לצאת מהמשחק?')) return;
+      if (ui.screen === 'lobby' && ui.room?.isHost && ui.room.players.length > 1 && !confirm('לצאת ולסגור את החדר לכולם?')) return;
+      location.href = homeUrl();
+      return;
     case 'qSelect': ui.qRank = ui.qRank === el.dataset.r ? null : el.dataset.r; return render();
     case 'qAsk':
       if (!ui.qRank) { toast('קודם בחרו ערך מהיד שלכם'); play('nope'); return; }
