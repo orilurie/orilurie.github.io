@@ -6,8 +6,8 @@
 //   states: idle | listening | talking | sleeping   (happy | dizzy | eating are accepted and mapped to reactions)
 //   react : pet | tickle | horn | bonk | eat | wake  (one-shots that return to the current base state by themselves)
 //   onHit : cb({part:'head'|'belly'|'horn'|'body', x, y})  x/y in container px
-import { UNICORN, NATURE, PROPS, BACKGROUND, SPRITES, FX } from './unicorn/manifest.js';
-import { applyUnicornLook } from './unicorn/unicorn-look.js';
+import { UNICORN, NATURE, PROPS, BACKGROUND, SPRITES, FX } from './unicorn/manifest.js?v=55';
+import { applyUnicornLook } from './unicorn/unicorn-look.js?v=55';
 
 const CDN = 'https://cdn.jsdelivr.net/npm/three@0.160.0/';
 
@@ -47,6 +47,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 const RAINBOW = UNICORN.colors.rainbow;
+const RAINBOW_GLOW = ['#ff4fa8', '#ff9a3c', '#ffd93c', '#4fdc6a', '#3cb4ff', '#9a5cff'];   // saturated: additive glows wash pastel to white
 
 export async function createScene(container, opts = {}) {
   const quality = opts.quality === 'low' ? 'low' : 'high';
@@ -55,7 +56,7 @@ export async function createScene(container, opts = {}) {
   const V3 = THREE.Vector3;
 
   // ------------------------------------------------------------------ renderer
-  const renderer = new THREE.WebGLRenderer({ antialias: HQ, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!opts.debug });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!opts.debug });
   const maxPR = HQ ? 2 : 1.5;
   let pixelRatio = Math.min(window.devicePixelRatio || 1, maxPR);
   renderer.setPixelRatio(pixelRatio);
@@ -157,8 +158,13 @@ export async function createScene(container, opts = {}) {
     const small = ['Grass_Common_Short', 'Flower_3_Group', 'Grass_Common_Tall', 'Clover_1', 'Flower_3_Group', 'Grass_Common_Short', 'Fern_1', 'Flower_4_Group', 'Grass_Common_Short', 'Flower_3_Group', 'Clover_1', 'Bush_Common_Flowers'];
     const place = {};   // kind → [Matrix4]
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new V3(), p = new V3(), up = new V3(0, 1, 0);
+    const CAMZ = 5.2;
     const add = (k, x, z, sc, ry) => {
       if (!I[k] || !src.getObjectByName(k)) return;
+      const big = k.startsWith('Bush') || k.startsWith('CommonTree');
+      // nothing big right behind the unicorn as seen from the camera (±35°), and no flower bushes close to it
+      if (big && z < CAMZ && Math.abs(Math.atan2(x, CAMZ - z)) < 0.61) return;
+      if (k === 'Bush_Common_Flowers' && Math.hypot(x, z) < 6) return;
       q.setFromAxisAngle(up, ry); s.setScalar(sc); p.set(x, 0, z);
       (place[k] ||= []).push(new THREE.Matrix4().compose(p, q, s));
     };
@@ -188,7 +194,21 @@ export async function createScene(container, opts = {}) {
         rel.multiplyMatrices(inv, m.matrixWorld);
         const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((mt) => {
           const c = mt.clone(); c.metalness = 0;
-          if (c.map || c.alphaTest > 0 || c.transparent) { c.alphaTest = Math.max(c.alphaTest, 0.5); c.transparent = false; c.side = THREE.DoubleSide; }
+          if (c.map || c.alphaTest > 0 || c.transparent) { c.alphaTest = Math.max(c.alphaTest, 0.5); c.transparent = false; c.side = THREE.DoubleSide; c.alphaToCoverage = true; }
+          if (/^Leaves_/.test(c.name) && c.map) {
+            // the leaf maps are dark/autumn red: keep their alpha + some shading, recolour to pastel green
+            c.color.set(c.name === 'Leaves_NormalTree' ? '#cfe8b0' : '#bfe3a4');
+            c.onBeforeCompile = (sh) => {
+              sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  float lum = dot( sampledDiffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) );
+  diffuseColor.rgb *= mix( 1.0, clamp( lum * 2.2, 0.55, 1.15 ), 0.6 );
+  diffuseColor.a *= sampledDiffuseColor.a;
+#endif`);
+            };
+            c.customProgramCacheKey = () => 'uniPastelLeaf';
+          }
+          if (c.name === 'Flowers') c.color.set('#ffd0e6');
           return keep(c);
         });
         const im = new THREE.InstancedMesh(m.geometry, mats.length === 1 ? mats[0] : mats, list.length);
@@ -263,6 +283,19 @@ export async function createScene(container, opts = {}) {
     }
   }
 
+  // ... and where the lying body ends up at the end of the Death clip (model space, x/z), to recentre the sleep pose
+  const lieCenter = new V3(2.2, 0, 0.3);
+  // stop the Death clip part-way (legs still tucked, reads as a cosy nap rather than flat on its side)
+  const DEATH_STOP = actions.Death ? actions.Death.getClip().duration * 0.6 : 0.6;
+  if (actions.Death) {
+    const a = actions.Death; a.play(); mixer.setTime(DEATH_STOP); model.updateMatrixWorld(true);
+    const box = new THREE.Box3(), v = new V3();
+    for (const n of ['Head', 'Tail7', 'Torso', 'BackLowerLegL', 'FrontLowerLegL']) { const b = bone(n); if (b) box.expandByPoint(model.worldToLocal(b.getWorldPosition(v))); }
+    const tipW = head.localToWorld(new V3(...UNICORN.headLocal.snoutTip)); box.expandByPoint(model.worldToLocal(tipW));
+    box.getCenter(lieCenter); lieCenter.y = 0;
+    a.stop(); mixer.setTime(0); model.updateMatrixWorld(true);
+  }
+
   // ------------------------------------------------------------------ props (food that flies in)
   const foods = [];
   if (propG) {
@@ -320,6 +353,7 @@ export async function createScene(container, opts = {}) {
     p.s.scale.setScalar(p.size0);
     return p;
   }
+  const tmpP = new V3();
   function updatePool(pool, dt) {
     for (const p of pool) {
       if (!p.on) continue;
@@ -334,7 +368,13 @@ export async function createScene(container, opts = {}) {
       const sz = lerp(p.size0, p.size1, 1 - (1 - t) * (1 - t));
       p.s.scale.setScalar(sz);
       const fi = p.fadeIn > 0 ? clamp(p.age / p.fadeIn, 0, 1) : 1;
-      p.mat.opacity = p.op * fi * (t > 0.6 ? 1 - (t - 0.6) / 0.4 : 1);
+      let top = 1;
+      if (pool === poolEmo || p.s.renderOrder === 30) {   // keep hearts / rainbow / zzz out of the top bar (~70 px)
+        tmpP.copy(p.s.position).project(camera);
+        const sy = (1 - tmpP.y) / 2 * H;   // sprite centre, container px
+        top = clamp((sy - 80) / 50, 0, 1);
+      }
+      p.mat.opacity = p.op * fi * top * (t > 0.6 ? 1 - (t - 0.6) / 0.4 : 1);
     }
   }
   // camera-facing helpers for bursts in the screen plane
@@ -351,7 +391,7 @@ export async function createScene(container, opts = {}) {
       const a = Math.random() * 6.28, sp = rnd(0.3, 1) * spread;
       const v = new V3().addScaledVector(camRight, Math.cos(a) * sp).addScaledVector(camUp, Math.sin(a) * sp + 0.25);
       const col = pick(colors);
-      spawn({ additive: true, tex: 'light_01', pos, vel: v, drag: 2.2, grav: -0.1, life: rnd(0.6, 1.0), size0: 0.22, size1: 0.02, color: col, opacity: 0.55 });
+      spawn({ additive: true, tex: 'light_01', pos, vel: v, drag: 2.2, grav: -0.1, life: rnd(0.6, 1.0), size0: 0.2, size1: 0.02, color: col, opacity: 0.4 });
       spawn({ additive: true, tex: pick(['star_04', 'star_06', 'star_07', 'star_08']), pos, vel: v, drag: 2.2, grav: -0.1, life: rnd(0.7, 1.1), size0: rnd(0.08, 0.14), size1: 0.02, spin: rnd(-3, 3), color: '#ffffff', opacity: 1 });
     }
   }
@@ -399,19 +439,20 @@ export async function createScene(container, opts = {}) {
     camera.aspect = W / H;
     // keep the unicorn in the area between the top bar (~60 px) and the bottom bar (~170 px portrait, ~90 px landscape phones)
     const landscape = W > H && H < 560;
-    const top = 62, bot = landscape ? 96 : 176;
+    const top = 62, bot = landscape ? 110 : (W < 500 ? 214 : 180);   // portrait phones: chips wrap 3+3
     const safeH = Math.max(120, H - top - bot);
     const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    const uniH = 1.75, uniW = 1.85;                         // horn tip to hooves, apparent width at 3/4 view (+ margin)
-    const dV = (uniH * H) / (0.86 * safeH * 2 * tan);
+    const uniH = 1.8, uniW = 1.5;                           // horn tip to hooves, apparent width at 3/4 view (+ margin)
+    const dV = (uniH * H) / ((landscape ? 0.95 : 0.95) * safeH * 2 * tan);
     const dH = uniW / (0.92 * 2 * tan * camera.aspect);
-    frame.dist = clamp(Math.max(dV, dH), 3.6, 9);
+    frame.dist = clamp(Math.max(dV, dH), 3.2, landscape ? 6 : 9);
     camera.setViewOffset(W, H, 0, (bot - top) / 2, W, H);
     camera.updateProjectionMatrix();
   }
 
   // ------------------------------------------------------------------ state machine
   let base = 'idle';           // idle | listening | talking | sleeping
+  const SLEEP_DELAY = 1.5;     // yawn first, then lie down
   let rx = null;               // current reaction {kind, t, dur, ...}
   let stateT = 0, time = 0;
   let idleClipT = rnd(7, 11), nextLookT = rnd(1.5, 3), nextYawnT = rnd(14, 22), nextTwitchT = rnd(2, 5);
@@ -425,10 +466,16 @@ export async function createScene(container, opts = {}) {
   let zzzT = 0;
   let dizzyAmt = 0;
   const food = { g: null, t: -1, from: new V3(), to: new V3(), bites: 0 };
-  let camPull = 0, camShake = 0;
+  let camPull = 0, pullAmt = 0.12, camShake = 0, lie = 0;
+  const tmpV3 = new V3();
+  // The Death clip ends with the horse on its left side, centred near model (2.4, 0, 0.4). Turn its back to the camera
+  // (head to the left, face a little toward us) and slide it back to the middle, so it reads as curled up asleep.
+  const SLEEP_YAW = (typeof window !== 'undefined' && window.__uniSleepYaw != null) ? window.__uniSleepYaw : 0.5;   // lying on its side, face and tucked legs toward the camera
+  const lieOff = new V3().copy(lieCenter).multiplyScalar(MODEL_SCALE).applyAxisAngle(new V3(0, 1, 0), SLEEP_YAW).negate();
+  lieOff.x += frame.target.x - 0.3; lieOff.z += frame.target.z;   // centre it where the camera looks (the snout sticks out right)
 
   function baseClip(fade = 0.45) {
-    if (base === 'sleeping') { play('Death', { loop: false, clampEnd: true, ts: 0.35, fade: 0.6 }); return; }
+    if (base === 'sleeping') { if (stateT >= SLEEP_DELAY) play('Death', { loop: false, clampEnd: true, ts: 0.4, fade: 1.1, from: 0.42 }); else play('Idle', { fade, ts: 0.6 }); return; }
     if (base === 'listening') { play('Idle', { ts: 0.75, fade }); return; }
     if (base === 'talking') { play('Idle', { ts: 1.1, fade }); return; }
     play(curName && ['Idle', 'Idle_2', 'Idle_Headlow'].includes(curName) ? curName : 'Idle', { fade });
@@ -443,13 +490,14 @@ export async function createScene(container, opts = {}) {
     const was = base;
     base = s; stateT = 0;
     if (s !== 'talking') mouthLevel = 0;
-    if (s === 'sleeping') { yawnT = -1; zzzT = 0.8; }
+    if (s === 'sleeping') { yawnT = 0; zzzT = 0.8; }
     if (was === 'sleeping' && s !== 'sleeping' && (!rx || rx.kind !== 'wake')) wakeUp();
     if (!rx) baseClip();
   }
 
+  function clearZzz() { for (const p of poolEmo) if (p.on && p.mat.map === TEX.zzz) p.age = Math.max(p.age, p.life * 0.75); }
   function wakeUp() {
-    eyeTarget = 0;
+    eyeTarget = 0; clearZzz();
     const hp = headWorld(new V3());
     sparkle(hp.add(new V3(0, 0.15, 0)), 8, 0.7);
   }
@@ -482,14 +530,15 @@ export async function createScene(container, opts = {}) {
       case 'bonk':
         play(Math.random() < 0.5 ? 'Idle_HitReact_Right' : 'Idle_HitReact_Left', { loop: false, fade: 0.08, ts: 0.85 });
         sq = -0.3; sqV = 0; camShake = 0.12;
-        spawn({ tex: 'glowing_star', pos: hp.clone().add(new V3(0, 0.28, 0)), life: 0.45, size0: 0.15, size1: 0.45, front: true, fadeIn: 0.02 });
+        camBasis();
+        spawn({ tex: 'glowing_star', pos: hp.clone().add(new V3(0, 0.42, 0)).addScaledVector(camRight, 0.22), life: 0.3, size0: 0.08, size1: 0.22, opacity: 0.5, front: true, fadeIn: 0.02 });
         sparkle(hp.clone().add(new V3(0, 0.2, 0)), 6, 1.2, ['#fff7a0', '#ffffff', '#ffd36e']);
         break;
       case 'eat':
         startFood();
         break;
       case 'wake':
-        eyeTarget = 0;
+        eyeTarget = 0; clearZzz();
         play('Jump_toIdle', { loop: false, fade: 0.5, ts: 0.9, from: 0.2 });
         sqV = 1.4;
         sparkle(hp.clone().add(new V3(0, 0.25, 0)), 8, 0.8);
@@ -507,18 +556,20 @@ export async function createScene(container, opts = {}) {
   function hornBurst() {
     const tip = hornTip(new V3());
     camBasis();
-    spawn({ additive: true, tex: 'flare_01', pos: tip, life: 0.5, size0: 0.4, size1: 1.4, color: '#ffffff', opacity: 0.9, fadeIn: 0.01, front: true });
-    spawn({ additive: true, tex: 'magic_02', pos: tip, life: 1.0, size0: 0.15, size1: 1.5, spin: 2.5, color: '#ffb3ec', opacity: 0.9, fadeIn: 0.02, front: true });
+    spawn({ additive: true, tex: 'flare_01', pos: tip, life: 0.4, size0: 0.25, size1: 0.9, color: '#ffd6f2', opacity: 0.45, fadeIn: 0.01, front: true });
+    spawn({ additive: true, tex: 'magic_02', pos: tip, life: 1.0, size0: 0.15, size1: 1.5, spin: 2.5, color: '#ff6fd0', opacity: 0.85, fadeIn: 0.02, front: true });
     rx.fired.ring2 = false;
     for (let i = 0; i < (HQ ? 36 : 24); i++) {
       const a = (i / (HQ ? 36 : 24)) * 6.28 + rnd(-0.1, 0.1), sp = rnd(1.0, 1.9);
       const v = new V3().addScaledVector(camRight, Math.cos(a) * sp).addScaledVector(camUp, Math.sin(a) * sp + 0.4);
-      const col = RAINBOW[i % RAINBOW.length];
-      spawn({ additive: true, tex: 'light_01', pos: tip, vel: v, drag: 2.4, grav: 0.4, life: rnd(0.9, 1.3), size0: 0.28, size1: 0.04, color: col, opacity: 0.75, front: true });
-      spawn({ additive: true, tex: pick(['star_06', 'star_07', 'star_08']), pos: tip, vel: v, drag: 2.4, grav: 0.4, life: rnd(1.0, 1.4), size0: 0.13, size1: 0.03, spin: rnd(-4, 4), color: col, opacity: 1, front: true });
+      const col = RAINBOW_GLOW[i % RAINBOW_GLOW.length];
+      if (i % 3 === 0) spawn({ additive: true, tex: 'light_01', pos: tip, vel: v, drag: 2.4, grav: 0.4, life: rnd(0.8, 1.1), size0: 0.16, size1: 0.03, color: col, opacity: 0.35, front: true });
+      spawn({ additive: true, tex: pick(['star_06', 'star_07', 'star_08']), pos: tip, vel: v, drag: 2.4, grav: 0.4, life: rnd(1.0, 1.4), size0: 0.15, size1: 0.04, spin: rnd(-4, 4), color: col, opacity: 1, front: true });
     }
-    const rb = tip.clone().addScaledVector(camUp, 0.3);
-    spawn({ tex: 'rainbow', pos: rb, vel: camUp.clone().multiplyScalar(0.25), life: 1.7, size0: 0.2, size1: 0.85, front: true, fadeIn: 0.15, rot: 0 });
+    const wide = W > H;
+    // the rainbow arcs beside the head (not above the horn, where it would run into the top bar)
+    const rb = headWorld(new V3()).addScaledVector(camUp, 0.1).addScaledVector(camRight, wide ? 0.7 : 0.45);
+    spawn({ tex: 'rainbow', pos: rb, vel: camUp.clone().multiplyScalar(0.06), life: 1.7, size0: 0.2, size1: wide ? 0.7 : 0.65, front: true, fadeIn: 0.15, rot: 0 });
   }
 
   // ---------- food
@@ -574,7 +625,7 @@ export async function createScene(container, opts = {}) {
       if (food.t > 1.75 && !rx.fired.yum) {
         rx.fired.yum = true;
         play('Jump_toIdle', { loop: false, fade: 0.35, ts: 1, from: 0.25 });
-        hearts(headWorld(new V3()).add(new V3(0, 0.2, 0)), 4);
+        hearts(headWorld(new V3()).add(new V3(0, 0.55, 0)), 4);
       }
     }
   }
@@ -594,6 +645,8 @@ export async function createScene(container, opts = {}) {
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const hitCbs = [];
+  const bodyBone = bone(UNICORN.bones.root);
+  const bodyRest = bodyBone ? model.worldToLocal(bodyBone.getWorldPosition(new V3())) : new V3();
   const pickMeshes = [];
   model.traverse((o) => { if (o.isMesh && o.visible && o.name !== 'Mouth') pickMeshes.push(o); });
   function hitTest(cx, cy) {
@@ -618,7 +671,9 @@ export async function createScene(container, opts = {}) {
       const p = hits[0].point;
       if (hits[0].object.parent && (hits[0].object.parent.name || '').startsWith('Eye')) return { part: 'head', x, y, point: p };
       if (p.distanceTo(headC) < headR * 1.05) return { part: 'head', x, y, point: p };
-      if (p.distanceTo(bellyC) < bellyR * 1.1) return { part: 'belly', x, y, point: p };
+      // belly = the lower half of the barrel (model space, measured on the rest pose; Body-bone motion subtracted)
+      const lp = model.worldToLocal(p.clone()).sub(bodyBone ? model.worldToLocal(bodyBone.getWorldPosition(new V3())).sub(bodyRest) : new V3());
+      if (lp.y > 1.85 && lp.y < 2.9 && lp.z > -1.05 && lp.z < 1.3) return { part: 'belly', x, y, point: p };
       return { part: 'body', x, y, point: p };
     }
     // forgiving spheres around the head and belly
@@ -667,17 +722,17 @@ export async function createScene(container, opts = {}) {
   // ------------------------------------------------------------------ per-frame update
   function update(dt) {
     time += dt; stateT += dt;
-    const sleeping = base === 'sleeping' && !(rx && rx.kind === 'wake');
+    const sleeping = base === 'sleeping' && !(rx && rx.kind === 'wake') && stateT >= SLEEP_DELAY;
 
     // ---- reactions timeline
     if (rx) {
       rx.t += dt;
       if (rx.kind === 'horn' && !rx.fired.ring2 && rx.t > 0.18) {
         rx.fired.ring2 = true;
-        spawn({ additive: true, tex: 'magic_05', pos: hornTip(new V3()), life: 1.0, size0: 0.2, size1: 1.9, spin: -2, color: '#b8e6ff', opacity: 0.85, fadeIn: 0.02, front: true });
+        spawn({ additive: true, tex: 'magic_05', pos: hornTip(new V3()), life: 1.0, size0: 0.2, size1: 1.6, spin: -2, color: '#7fb8ff', opacity: 0.4, fadeIn: 0.02, front: true });
       }
       if (rx.kind === 'horn' && rx.t < 1.2 && Math.random() < 0.6) {
-        spawn({ additive: true, tex: pick(['star_04', 'star_08']), pos: hornTip(new V3()), vel: new V3(rnd(-0.4, 0.4), rnd(0.2, 0.7), rnd(-0.4, 0.4)), life: 0.7, size0: 0.1, size1: 0.02, color: pick(RAINBOW), spin: 3 });
+        spawn({ additive: true, tex: pick(['star_04', 'star_08']), pos: hornTip(new V3()), vel: new V3(rnd(-0.4, 0.4), rnd(0.2, 0.7), rnd(-0.4, 0.4)), life: 0.7, size0: 0.1, size1: 0.02, color: pick(RAINBOW_GLOW), spin: 3 });
       }
       if (rx.kind === 'pet' && !rx.fired.h2 && rx.t > 0.5) { rx.fired.h2 = true; hearts(headWorld(new V3()).add(new V3(0, 0.25, 0)), 3); }
       if (rx.kind === 'tickle' && !rx.fired.t2 && rx.t > 0.55) { rx.fired.t2 = true; sqV = 2.2; sparkle(bellyWorld(new V3()), 5, 0.8, ['#ffffff', '#ffe0f4', '#fff3a8']); }
@@ -693,13 +748,15 @@ export async function createScene(container, opts = {}) {
         if (idleClipT <= 0) {
           idleClipT = rnd(7, 12);
           const r = Math.random();
-          play(r < 0.5 ? 'Idle' : r < 0.82 ? 'Idle_2' : 'Idle_Headlow', { fade: 0.8 });
+          play(r < 0.52 ? 'Idle' : r < 0.9 ? 'Idle_2' : 'Idle_Headlow', { fade: 0.8 });
         }
         nextYawnT -= dt;
         if (nextYawnT <= 0 && yawnT < 0) { yawnT = 0; nextYawnT = rnd(16, 26); }
       }
     }
-    if (yawnT >= 0) { yawnT += dt; if (yawnT > 2.4 || rx || base !== 'idle') yawnT = -1; }
+    if (base === 'sleeping' && !rx && stateT >= SLEEP_DELAY && stateT - dt < SLEEP_DELAY) baseClip();   // lie down after the yawn
+    if (curName === 'Death' && curAction && !curAction.paused && curAction.time >= DEATH_STOP) { curAction.time = DEATH_STOP; curAction.paused = true; }
+    if (yawnT >= 0) { yawnT += dt; if (yawnT > 2.4 || rx || (base !== 'idle' && base !== 'sleeping')) yawnT = -1; }
 
     // ---- look target
     lookTgt.hold -= dt;
@@ -726,13 +783,14 @@ export async function createScene(container, opts = {}) {
     tiltCur = damp(tiltCur, listening ? 0.32 : (rx && rx.kind === 'pet') ? -0.25 : 0, 4, dt);
     earPerk = damp(earPerk, listening ? 1 : sleeping ? -0.7 : 0, 5, dt);
     dizzyAmt = damp(dizzyAmt, rx && rx.kind === 'bonk' && rx.t > 0.2 && rx.t < 2.4 ? 1 : 0, 6, dt);
-    mouthSm = damp(mouthSm, base === 'talking' ? mouthLevel : 0, 18, dt);
+    mouthSm = damp(mouthSm, base === 'sleeping' ? 0 : mouthLevel, 18, dt);
 
     let yaw = lookCur.yaw, pitch = lookCur.pitch, tilt = tiltCur, mouth = mouthSm;
     // breathing nod / talking nod
     const breathe = Math.sin(time * (sleeping ? 1.6 : 2.4));
     pitch += breathe * 0.015;
-    if (base === 'talking') { pitch -= mouthSm * 0.28; tilt += Math.sin(time * 3.1) * 0.06; yaw += Math.sin(time * 1.7) * 0.05; }
+    pitch -= mouthSm * 0.28;
+    if (base === 'talking') { tilt += Math.sin(time * 3.1) * 0.06; yaw += Math.sin(time * 1.7) * 0.05; }
     if (yawnT >= 0) {
       const k = Math.sin(clamp(yawnT / 2.4, 0, 1) * Math.PI);
       pitch += k * 0.45; mouth = Math.max(mouth, smooth(k * 1.6) * 0.95);
@@ -742,7 +800,7 @@ export async function createScene(container, opts = {}) {
       tilt += Math.cos(time * 6.5) * 0.25 * dizzyAmt;
     }
     if (rx && rx.kind === 'tickle') mouth = Math.max(mouth, 0.55 + 0.35 * Math.sin(rx.t * 22));
-    if (rx && rx.kind === 'horn') pitch += Math.sin(clamp(rx.t / 1.2, 0, 1) * Math.PI) * 0.35;
+    if (rx && rx.kind === 'horn') pitch += Math.sin(clamp(rx.t / 1.2, 0, 1) * Math.PI) * 0.15;
     if (rx && rx.kind === 'pet') mouth = Math.max(mouth, 0.35 * Math.sin(clamp(rx.t / 1.2, 0, 1) * Math.PI));
     if (rx && rx.kind === 'eat' && food.t > 0.6 && food.t < 1.7) mouth = Math.max(mouth, 0.25 + 0.25 * Math.sin(food.t * 18));
     if (rx && rx.kind === 'wake') mouth = Math.max(mouth, 0.5 * Math.sin(clamp(rx.t / 0.8, 0, 1) * Math.PI));
@@ -782,6 +840,8 @@ export async function createScene(container, opts = {}) {
     if (eyeK > 0.02) { look.setEyesClosed(eyeK); eyesWereClosed = true; }
     else if (eyesWereClosed) { look.setEyesClosed(0); eyesWereClosed = false; }
     look.update(dt);
+    if (mouthSm > 0.01) head.scale.z *= 1 + 0.06 * mouthSm;
+    if (sleeping && torso) { const b = 1 + 0.03 * Math.sin(time * 1.6); torso.scale.set(b, b, b); } else if (torso && torso.scale.x !== 1) torso.scale.set(1, 1, 1);
 
     // ---- body: breathing scale, squash spring, hops
     sqV += (-140 * sq - 9 * sqV) * dt; sq += sqV * dt;
@@ -800,28 +860,28 @@ export async function createScene(container, opts = {}) {
     const tip = hornTip(new V3());
     hornGlow.position.copy(tip);
     const hornBoost = rx && rx.kind === 'horn' ? Math.max(0, 1 - rx.t / 1.6) : 0;
-    hornGlow.scale.setScalar(0.2 + Math.sin(time * 2.2) * 0.03 + hornBoost * 0.6);
-    hornGlow.material.opacity = (sleeping ? 0.15 : 0.3) + hornBoost * 0.55;
-    if (hornBoost > 0) { tmpC.setHSL((time * 1.5) % 1, 0.9, 0.7); hornMat.emissive.copy(tmpC); hornMat.emissiveIntensity = 0.22 + hornBoost * 1.1; hornGlow.material.color.copy(tmpC); }
-    else { hornMat.emissive.copy(hornEmissive); hornMat.emissiveIntensity = 0.22 + Math.sin(time * 2.2) * 0.05; hornGlow.material.color.set('#ffd9f4'); }
+    hornGlow.scale.setScalar(0.2 + Math.sin(time * 2.2) * 0.03 + hornBoost * 0.22);
+    hornGlow.material.opacity = (sleeping ? 0.15 : 0.3) + hornBoost * 0.3;
+    if (hornBoost > 0) { tmpC.setHSL((time * 1.5) % 1, 0.9, 0.7); hornMat.emissive.copy(tmpC); hornMat.emissiveIntensity = 0.35 + hornBoost * 1.1; hornGlow.material.color.copy(tmpC); }
+    else { hornMat.emissive.copy(hornEmissive); hornMat.emissiveIntensity = 0.35 + Math.sin(time * 2.2) * 0.05; hornGlow.material.color.set('#ffe3a8'); }
 
     const hp = headWorld(new V3());
     dizzyStars.forEach((s, i) => {
       s.visible = dizzyAmt > 0.02;
       if (!s.visible) return;
       const a = time * 4 + (i / dizzyStars.length) * 6.28;
-      s.position.set(hp.x + Math.cos(a) * 0.3, hp.y + 0.3 + Math.sin(a * 2) * 0.02 + Math.sin(a) * 0.06, hp.z + Math.sin(a) * 0.3);
-      s.scale.setScalar(0.12 * dizzyAmt);
+      s.position.set(hp.x + Math.cos(a) * 0.34, hp.y + 0.32 + Math.sin(a) * 0.07, hp.z + Math.sin(a) * 0.34);
+      s.scale.setScalar(0.15 * dizzyAmt);
       s.material.opacity = dizzyAmt;
       s.material.rotation = Math.sin(time * 5 + i) * 0.4;
     });
 
-    if (sleeping && stateT > 1.6) {
+    if (sleeping && stateT > 3) {
       zzzT -= dt;
       if (zzzT <= 0) {
-        zzzT = 1.3;
+        zzzT = 1.6;
         camBasis();
-        spawn({ tex: 'zzz', pos: hp.clone().add(new V3(0, 0.2, 0)).addScaledVector(camRight, 0.12), vel: camUp.clone().multiplyScalar(0.28).addScaledVector(camRight, 0.12), life: 2.6, size0: 0.08, size1: 0.3, wob: 0.15, front: true, fadeIn: 0.4 });
+        spawn({ tex: 'zzz', pos: hp.clone().add(new V3(0, 0.25, 0)).addScaledVector(camRight, 0.15), vel: camUp.clone().multiplyScalar(0.2).addScaledVector(camRight, 0.1), life: 3.0, size0: 0.14, size1: 0.48, wob: 0.35, front: true, fadeIn: 0.4 });
       }
     }
 
@@ -837,32 +897,39 @@ export async function createScene(container, opts = {}) {
     updatePool(poolEmo, dt);
 
     // ---- camera: gentle orbit sway, closer while listening/talking, shake on bonk
-    camPull = damp(camPull, base === 'listening' || base === 'talking' ? 1 : sleeping ? 0.4 : 0, 1.5, dt);
+    lie = damp(lie, sleeping ? 1 : 0, sleeping ? 1.6 : 3.5, dt);
+    model.rotation.y = lerp(BASE_YAW, SLEEP_YAW, smooth(lie));
+    model.position.set(lieOff.x * smooth(lie), 0, lieOff.z * smooth(lie));
+    camPull = damp(camPull, base === 'listening' || base === 'talking' ? 1 : 0, 1.5, dt);
+    pullAmt = damp(pullAmt, base === 'talking' ? 0.26 : 0.12, 1.5, dt);
     camShake = Math.max(0, camShake - dt * 0.35);
-    const d = frame.dist * (1 - 0.1 * camPull);
+    const d = frame.dist * (1 - pullAmt * camPull) * (1 + 0.3 * smooth(lie));
     const yawC = Math.sin(time * 0.21) * 0.07 + Math.sin(time * 0.13) * 0.03;
     const el = frame.elev + Math.sin(time * 0.17) * 0.025 + camPull * 0.02;
-    const tgt = tmpV.copy(frame.target); tgt.y += camPull * 0.1 - (sleeping ? 0.25 * camPull : 0); tgt.x -= camPull * 0.05;
+    const tgt = tmpV.copy(frame.target); tgt.y += camPull * 0.1 - lie * 0.38; tgt.x -= camPull * 0.05;
+    if (camPull > 0.001) { headWorld(tmpV3); tmpV3.y -= 0.25; tgt.lerp(tmpV3, camPull * pullAmt * 1.6); }
     camera.position.set(tgt.x + Math.sin(yawC) * d * Math.cos(el), tgt.y + Math.sin(el) * d, tgt.z + Math.cos(yawC) * d * Math.cos(el));
     if (camShake > 0) camera.position.add(tmpV2.set(rnd(-1, 1), rnd(-1, 1), 0).multiplyScalar(camShake * 0.25));
     camera.lookAt(tgt);
   }
 
   // ------------------------------------------------------------------ loop (with adaptive resolution)
-  let raf = 0, last = performance.now(), alive = true, frameAvg = 1 / 60, slowFor = 0, fastFor = 0;
-  const minPR = 1;
+  let raf = 0, last = performance.now(), alive = true, paused = false, frameAvg = 1 / 60, slowFor = 0, fastFor = 0;
+  const minPR = (window.devicePixelRatio || 1) >= 2 ? 1.25 : 1;
+  let resLocked = false;
   function loop(now) {
     if (!alive) return;
     raf = requestAnimationFrame(loop);
     const rawDt = (now - last) / 1000; last = now;
     const dt = Math.min(0.05, Math.max(0, rawDt));
     frameAvg = lerp(frameAvg, rawDt, 0.05);
-    if (!document.hidden && rawDt < 0.5) {
+    if (!document.hidden && rawDt < 0.5 && !resLocked) {
       if (frameAvg > 1 / 45) slowFor += rawDt; else slowFor = 0;
       if (frameAvg < 1 / 58) fastFor += rawDt; else fastFor = 0;
       if (slowFor > 2 && pixelRatio > minPR) { pixelRatio = Math.max(minPR, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); resize(); slowFor = 0; }
       else if (fastFor > 6 && pixelRatio < Math.min(window.devicePixelRatio || 1, maxPR) - 0.01) { pixelRatio = Math.min(maxPR, pixelRatio + 0.25); renderer.setPixelRatio(pixelRatio); resize(); fastFor = 0; }
     }
+    if (paused) return;
     update(dt);
     renderer.render(scene, camera);
   }
@@ -880,6 +947,15 @@ export async function createScene(container, opts = {}) {
     setMouth(v) { mouthLevel = clamp(+v || 0, 0, 1); },
     onHit(cb) { if (typeof cb === 'function') hitCbs.push(cb); },
     resize,
+    // while a clip records, keep the canvas size fixed (no adaptive pixel-ratio changes)
+    lockResolution(on) { resLocked = !!on; slowFor = fastFor = 0; },
+    // screen position (container px) of a part: 'head' | 'horn' | 'belly'
+    partAt(part) {
+      model.updateMatrixWorld(true);
+      const p = part === 'horn' ? look.horn.localToWorld(new V3(0, UNICORN.look.horn.length * 0.6, 0)) : part === 'belly' ? model.localToWorld(new V3(0.5, 2.45, 0.2)) : headWorld(new V3());
+      p.project(camera);
+      return { x: (p.x + 1) / 2 * W, y: (1 - p.y) / 2 * H };
+    },
     destroy() {
       alive = false;
       cancelAnimationFrame(raf);
@@ -900,12 +976,13 @@ export async function createScene(container, opts = {}) {
   };
   if (opts.debug) {
     api.__debug = {
-      THREE, renderer, scene, camera, look, mixer, actions, hitTest, yawn() { yawnT = 0; },
+      THREE, renderer, scene, camera, look, mixer, actions, hitTest, yawn() { yawnT = 0; }, pause(v = true) { paused = v; },
       get state() { return { base, react: rx && rx.kind, clip: curName, pixelRatio, fps: Math.round(1 / frameAvg), calls: renderer.info.render.calls, tris: renderer.info.render.triangles }; },
       step(sec, n = 30) { for (let i = 0; i < n; i++) update(sec / n); renderer.render(scene, camera); },
+      boneAt(n) { const b = model.getObjectByName(n); const p = b.getWorldPosition(new V3()); const w = p.toArray().map((x) => +x.toFixed(2)); p.project(camera); return { w, x: Math.round((p.x + 1) / 2 * W), y: Math.round((1 - p.y) / 2 * H) }; },
       partAt(part) {   // screen position of a part (for tests)
         model.updateMatrixWorld(true);
-        const p = part === 'horn' ? look.horn.localToWorld(new V3(0, UNICORN.look.horn.length * 0.6, 0)) : part === 'belly' ? bellyWorld(new V3()) : part === 'head' ? headWorld(new V3()) : model.localToWorld(new V3(0, 2.8, -1.2));
+        const p = part === 'horn' ? look.horn.localToWorld(new V3(0, UNICORN.look.horn.length * 0.6, 0)) : part === 'belly' ? model.localToWorld(new V3(0.5, 2.45, 0.2)) : part === 'head' ? headWorld(new V3()) : part === 'leg' ? model.localToWorld(new V3(0.4, 1.2, 1.4)) : model.localToWorld(new V3(0.6, 3.2, -0.6));
         p.project(camera);
         const r = canvas.getBoundingClientRect();
         return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };

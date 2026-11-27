@@ -38,18 +38,21 @@ const VAD = {
   chunkSec: 0.02,
   startChunks: 3,       // consecutive loud chunks to trigger
   silenceSec: 0.8,      // stop after this much silence
-  minSec: 0.3,          // minimum voiced length
-  maxSec: 10,           // cap
+  minSec: 0.2,          // minimum voiced length
+  maxSec: 8,            // cap (keeps the off-thread PSOLA under ~1 s on slow phones)
   prerollSec: 0.35,
-  tailSec: 0.15,        // kept after last voiced chunk
+  tailSec: 0.3,         // kept after last voiced chunk (soft final consonants)
+  quietChunks: 8,       // after unmute/start: need ~170 ms below threshold before arming
   minStart: 0.008,
   minCont: 0.005,
 };
 
 export function pickRecorderMime() {
   if (typeof MediaRecorder === 'undefined') return '';
-  const c = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm',
-    'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
+  // mp4 first: it carries a duration, seeks in the preview and is accepted by WhatsApp/iOS
+  // (Chrome 126+ and Safari record it); webm is the fallback
+  const c = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus', 'video/webm'];
   for (const t of c) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
   return '';
 }
@@ -261,8 +264,8 @@ async function renderFx(x, sr, style) {
     end.connect(dry); end.connect(echo(0.09, 0.25, 0.18));
   } else if (style === 'monster') {
     const drive = ctx.createWaveShaper(); drive.oversample = '4x';
-    drive.curve = shaperCurve(v => Math.tanh(v * 4) / Math.tanh(4));
-    const pre = ctx.createGain(); pre.gain.value = 1.6;
+    drive.curve = shaperCurve(v => Math.tanh(v * 2.5) / Math.tanh(2.5));
+    const pre = ctx.createGain(); pre.gain.value = 1.0;
     const end = chain(src, bq('lowshelf', 180, 8), pre, drive, bq('lowpass', 3200, 0, 0.9), bq('peaking', 700, -3, 1));
     dry.gain.value = 0.8;
     end.connect(dry); end.connect(reverb(1.6, 2.5, 0.35, 0.3)); end.connect(echo(0.26, 0.3, 0.15));
@@ -320,14 +323,63 @@ function finish(y, sr) {
   return o;
 }
 
-// Full style pipeline on raw mono samples. Exported for tests / debug.
-export async function processVoice(raw, sr, style = 'classic', { fx = true } = {}) {
-  const def = STYLE_DEF[style] || STYLE_DEF.classic;
+// The heavy, pure DSP part (resample + pitch tracking + PSOLA). Runs in a Worker when it can.
+function shiftSync(raw, sr, def) {
   let x = resample(raw, def.resample);
   let monoF0 = 0;
   const tr = trackPitch(x, sr);
   if (def.mono) { const m = medianF0(tr); monoF0 = m ? Math.max(90, Math.min(220, m * def.mono)) : 110; }
-  x = psola(x, sr, { pitch: def.pitch, stretch: def.stretch, monoF0 }, tr);
+  return psola(x, sr, { pitch: def.pitch, stretch: def.stretch, monoF0 }, tr);
+}
+function voicedSecSync(raw, sr) {
+  const tr = trackPitch(raw, sr); let nv = 0; for (const f of tr.f0) if (f > 0) nv++;
+  return nv * tr.hopSamples / sr;
+}
+
+// Blob-URL worker built from the same functions (they only use Math and typed arrays).
+let dspWorker = null, dspFailed = false, dspSeq = 0;
+const dspWait = new Map();
+function getWorker() {
+  if (dspWorker || dspFailed) return dspWorker;
+  try {
+    if (typeof Worker === 'undefined' || typeof Blob === 'undefined') throw new Error('no worker');
+    const src = [rmsOf, lowpassFIR, resample, trackPitch, medianF0, psola, shiftSync, voicedSecSync]
+      .map(f => f.toString().replace(/^export\s+/, '')).join('\n') + `
+self.onmessage = (e) => {
+  const { id, op, raw, sr, def } = e.data;
+  try {
+    if (op === 'voiced') self.postMessage({ id, value: voicedSecSync(raw, sr) });
+    else { const y = shiftSync(raw, sr, def); const out = y === raw ? y.slice() : y; self.postMessage({ id, value: out }, [out.buffer]); }
+  } catch (err) { self.postMessage({ id, error: String(err) }); }
+};`;
+    const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+    dspWorker = new Worker(url); URL.revokeObjectURL(url);
+    dspWorker.onmessage = (e) => { const w = dspWait.get(e.data.id); if (!w) return; dspWait.delete(e.data.id); e.data.error ? w.rej(new Error(e.data.error)) : w.res(e.data.value); };
+    dspWorker.onerror = () => { dspFailed = true; try { dspWorker.terminate(); } catch (e) {} dspWorker = null; for (const w of dspWait.values()) w.rej(new Error('worker')); dspWait.clear(); };
+  } catch (e) { dspFailed = true; dspWorker = null; }
+  return dspWorker;
+}
+async function dsp(op, raw, sr, def) {
+  const w = getWorker();
+  if (w) {
+    try {
+      return await new Promise((res, rej) => {
+        const id = ++dspSeq; dspWait.set(id, { res, rej });
+        const copy = raw.slice();   // transfer a copy: the caller keeps its array (replay)
+        w.postMessage({ id, op, raw: copy, sr, def }, [copy.buffer]);
+      });
+    } catch (e) { /* fall through to the main thread */ }
+  }
+  return op === 'voiced' ? voicedSecSync(raw, sr) : shiftSync(raw, sr, def);
+}
+
+// Full style pipeline on raw mono samples. Exported for tests / debug.
+export async function processVoice(raw, sr, style = 'classic', { fx = true } = {}) {
+  const def = STYLE_DEF[style] || STYLE_DEF.classic;
+  // fixed input level, so the drive/FX character does not depend on mic gain (AGC)
+  { let pk = 0; for (let i = 0; i < raw.length; i++) { const a = Math.abs(raw[i]); if (a > pk) pk = a; }
+    if (pk > 1e-4) { const g = 0.3 / pk, r2 = new Float32Array(raw.length); for (let i = 0; i < raw.length; i++) r2[i] = raw[i] * g; raw = r2; } }
+  let x = await dsp('shift', raw, sr, def);
   if (!fx) return x;
   x = await renderFx(x, sr, style);
   return finish(x, sr);
@@ -344,6 +396,7 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
   // VAD state
   let floor = 0.004, loudRun = 0, hearing = false, preroll = [], prerollLen = 0;
   let rec = [], recLen = 0, voicedEnd = 0, voicedStart = 0, samplesSeen = 0;
+  let holdUntil = 0, needQuiet = 0, bgPaused = false, lvls = [], checking = false;
 
   const setState = (s, info) => { if (state === s && !info) return; state = s; try { onState(s, info); } catch (e) { console.error(e); } };
 
@@ -363,7 +416,14 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
     try { const b = ctx.createBuffer(1, 1, ctx.sampleRate), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (e) {}
   }
-  const onVis = () => { if (!document.hidden && ctx && ctx.state !== 'running' && (active || playing)) ctx.resume().catch(() => {}); };
+  const onVis = () => {
+    // background tab / app switch: stop listening (mic indicator stays, but nothing is heard or repeated)
+    if (document.hidden) { bgPaused = true; resetVad(); if (track) track.enabled = false; if (state === 'hearing') setState('listening'); return; }
+    bgPaused = false;
+    if (track && !playing && !muted) track.enabled = true;
+    if (ctx) { ignoreUntil = ctx.currentTime + 0.3; needQuiet = VAD.quietChunks; }
+    if (ctx && ctx.state !== 'running' && (active || playing)) ctx.resume().catch(() => {});
+  };
   const onGesture = () => { if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); };
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onVis);
@@ -376,10 +436,11 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
   }
 
   function onChunk(c) {
-    if (!active || muted || playing) return;
+    if (!active || muted || playing || bgPaused || checking) return;
     const sr = ctx.sampleRate;
     samplesSeen += c.length;
     if (ctx.currentTime < ignoreUntil) return;
+    if (!hearing && ctx.currentTime < holdUntil) { loudRun = 0; preroll = []; prerollLen = 0; return; }   // own SFX playing
     const lvl = rmsOf(c);
     if (onMicLevel) { try { onMicLevel(Math.min(1, lvl * 8)); } catch (e) {} }
     const startThr = Math.max(floor * 3.2, VAD.minStart);
@@ -390,8 +451,10 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
       floor = Math.min(0.2, Math.max(0.0005, floor));
       preroll.push(c); prerollLen += c.length;
       while (preroll.length > 1 && prerollLen - preroll[0].length >= VAD.prerollSec * sr) prerollLen -= preroll.shift().length;
+      if (needQuiet > 0) { needQuiet = lvl < startThr ? needQuiet - 1 : VAD.quietChunks; loudRun = 0; return; }
       loudRun = lvl > startThr ? loudRun + 1 : 0;
       if (loudRun >= VAD.startChunks) {
+        lvls = [];
         hearing = true;
         rec = preroll; recLen = prerollLen; preroll = []; prerollLen = 0;
         voicedStart = recLen - loudRun * c.length; voicedEnd = recLen;
@@ -399,7 +462,7 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
       }
       return;
     }
-    rec.push(c); recLen += c.length;
+    rec.push(c); recLen += c.length; lvls.push(lvl);
     if (lvl > contThr) voicedEnd = recLen;
     const silent = (recLen - voicedEnd) / sr;
     if (silent >= VAD.silenceSec || recLen / sr >= VAD.maxSec) endUtterance();
@@ -409,12 +472,24 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     const sr = ctx.sampleRate;
     const voicedSec = (voicedEnd - voicedStart) / sr;
     const keep = Math.min(recLen, voicedEnd + Math.round(VAD.tailSec * sr));
-    const chunks = rec; resetVad();
+    const chunks = rec, capped = recLen / sr >= VAD.maxSec, lv = lvls; resetVad();
     if (voicedSec < VAD.minSec) { setState('listening'); return; }
+    if (capped) {   // 10 s with no pause: speech has syllable dips, TV/music/fan does not
+      const s = lv.slice().sort((a, b) => a - b), med = s[s.length >> 1];
+      const dips = lv.filter(l => l < med * 0.25).length / lv.length;
+      if (dips < 0.06) { floor = Math.min(0.2, med); needQuiet = VAD.quietChunks; setState('listening'); return; }
+    }
     const raw = new Float32Array(keep); let o = 0;
     for (const ch of chunks) { if (o >= keep) break; const n = Math.min(ch.length, keep - o); raw.set(ch.subarray(0, n), o); o += n; }
-    lastRaw = raw;
-    speak(raw);
+    // knocks, claps, taps on the phone: no voicing (checked off the main thread)
+    checking = true;
+    dsp('voiced', raw, sr).then((vs) => {
+      checking = false;
+      if (destroyed) return;
+      if (vs < 0.12 || !active) { needQuiet = VAD.quietChunks; setState(active ? 'listening' : 'idle'); return; }
+      lastRaw = raw;
+      speak(raw);
+    }, () => { checking = false; lastRaw = raw; speak(raw); });
   }
 
   function muteMic(on) {
@@ -466,8 +541,8 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     // let the reverb/room settle before the mic listens again
     await new Promise(r => setTimeout(r, 250));
     if (playing) return;
-    muteMic(false);
-    ignoreUntil = ctx.currentTime + 0.15;
+    muteMic(bgPaused);
+    ignoreUntil = ctx.currentTime + 0.15; needQuiet = VAD.quietChunks;
     setState(active ? 'listening' : 'idle');
   }
 
@@ -478,6 +553,8 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     if (active) { setState(playing ? 'talking' : 'listening'); return true; }
     try {
       if (!stream) {
+        // iOS 17+: keep output on the loudspeaker while the mic is open
+        try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
         stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
         });
@@ -498,16 +575,16 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
           capNode.onaudioprocess = (e) => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
         }
         micSrc.connect(capNode); capNode.connect(sink);
-        track.onended = () => { if (active) { active = false; stream = null; setState('denied', { reason: 'ended' }); } };
+        track.onended = () => { if (active) { active = false; resetVad(); releaseMic(); setState('denied', { reason: 'ended' }); } };
       }
       if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) {} }
       active = true; resetVad(); muteMic(!!playing);
-      ignoreUntil = ctx.currentTime + 0.2;
+      ignoreUntil = ctx.currentTime + 0.2; needQuiet = VAD.quietChunks;
       setState(playing ? 'talking' : 'listening');
       return true;
     } catch (err) {
       active = false;
-      setState('denied', { reason: !err ? 'error' : (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') ? 'nodevice' : 'error', error: err });
+      setState('denied', { reason: !err ? 'error' : (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') ? 'nodevice' : (err.name === 'NotReadableError' || err.name === 'AbortError') ? 'busy' : 'error', error: err });
       return false;
     }
   }
@@ -541,8 +618,11 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     if (ctx) { ctx.close().catch(() => {}); ctx = null; }
   }
 
+  // the page's own sounds (SFX, snore) must not be heard as speech: call with the sound's duration
+  function holdOff(sec) { if (ctx) holdUntil = Math.max(holdUntil, ctx.currentTime + sec); }
+
   const voice = {
-    start, stop, setStyle, speak, destroy, captureStream,
+    start, stop, setStyle, speak, destroy, captureStream, holdOff,
     styles: STYLE_LIST.map(s => ({ ...s })),
     isSupported,
     get style() { return style; },

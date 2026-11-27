@@ -5,7 +5,7 @@
 //   per frame, AFTER mixer.update():  look.update(dt)   (re-applies bone scales, blink)
 //   look.setMouth(0..1)   look.blink()   look.horn / look.head / look.eyes / look.ears
 // THREE is passed in so this file has no import of its own.
-import { UNICORN } from './manifest.js';
+import { UNICORN } from './manifest.js?v=55';
 
 export function applyUnicornLook(root, THREE, opts = {}) {
   const o = { ...UNICORN.look, ...opts };
@@ -56,7 +56,7 @@ vec3 uniRainbow(float h){ vec3 k = clamp(abs(mod(h*6.0+vec3(0.,4.,2.),6.0)-3.0)-
   }
   geo.computeVertexNormals(); geo.translate(0, H.length / 2, 0);
   const horn = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-    color: C.horn, emissive: C.hornGlow, emissiveIntensity: 0.22, roughness: 0.2, metalness: 0.45 }));
+    color: C.horn, emissive: C.hornEmissive || C.hornGlow, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.6 }));
   horn.name = 'Horn'; horn.castShadow = true;
   horn.position.fromArray(H.pos);
   horn.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...H.dir).normalize());
@@ -73,14 +73,35 @@ vec3 uniRainbow(float h){ vec3 k = clamp(abs(mod(h*6.0+vec3(0.,4.,2.),6.0)-3.0)-
       const g = new THREE.Group(); g.name = side > 0 ? 'EyeL' : 'EyeR';
       g.position.fromArray(pos);
       const ball = new THREE.Mesh(new THREE.SphereGeometry(E.radius, 24, 16), irisMat);
-      const s1 = new THREE.Mesh(new THREE.SphereGeometry(E.radius * 0.3, 12, 8), shineMat);
+      const s1 = new THREE.Mesh(new THREE.SphereGeometry(E.radius * 0.36, 12, 8), shineMat);
       s1.position.set(side * E.radius * 0.78, E.radius * 0.38, E.radius * 0.42);
-      const s2 = new THREE.Mesh(new THREE.SphereGeometry(E.radius * 0.14, 8, 6), shineMat);
+      const s2 = new THREE.Mesh(new THREE.SphereGeometry(E.radius * 0.18, 8, 6), shineMat);
       s2.position.set(side * E.radius * 0.8, -E.radius * 0.1, -E.radius * 0.35);
       ball.name = 'Ball'; s1.name = 'Shine'; s2.name = 'Shine2';
       g.add(ball, s1, s2);
       g.scale.set(E.flatten, 1, 1);
       head.add(g); eyes.push(g);
+    });
+  }
+
+  // ---------- soft pink cheek blush ----------
+  const blush = [];
+  if (o.blush) {
+    const Bl = o.blush;
+    const bm = new THREE.MeshBasicMaterial({ color: C.blush || '#ff8fbf', transparent: true, opacity: Bl.opacity, depthWrite: false, toneMapped: false });
+    const bTex = (() => {   // soft-edged disc
+      const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+      const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.55, 'rgba(255,255,255,.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(cv);
+    })();
+    bm.map = bTex;
+    [-1, 1].forEach((side) => {
+      const d = new THREE.Mesh(new THREE.CircleGeometry(Bl.radius, 20), bm);
+      d.position.set(side * Bl.pos[0], Bl.pos[1], Bl.pos[2]);
+      d.lookAt(new THREE.Vector3(side * 5, Bl.pos[1] + 0.8, Bl.pos[2] + 0.4));   // faces outward (head-local), set before parenting
+      d.name = side > 0 ? 'BlushL' : 'BlushR'; d.renderOrder = 2;
+      head.add(d); blush.push(d);
     });
   }
 
@@ -94,6 +115,11 @@ vec3 uniRainbow(float h){ vec3 k = clamp(abs(mod(h*6.0+vec3(0.,4.,2.),6.0)-3.0)-
   inner.add(tongue);
   inner.scale.set(M.width, M.depth, 0.001);
   mouth.add(inner); mouth.visible = false; head.add(mouth);
+  // lower jaw / chin: a muzzle-coloured lip that drops (head-local -Z) as the mouth opens, so the snout visibly opens
+  const jaw = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 10), new THREE.MeshStandardMaterial({ color: C.Muzzle, roughness: 0.55, emissive: '#ffd3ee', emissiveIntensity: 0.16 }));
+  jaw.name = 'Jaw'; jaw.scale.set(M.width * 1.05, M.depth * 1.1, M.height * 0.32);
+  jaw.position.set(0, -M.depth * 0.15, -M.height * 0.2);
+  mouth.add(jaw);
 
   // ---------- proportions ----------
   const scales = [[UNICORN.bones.head, o.headScale], [UNICORN.bones.neck[0], o.neckScale]];
@@ -107,7 +133,7 @@ vec3 uniRainbow(float h){ vec3 k = clamp(abs(mod(h*6.0+vec3(0.,4.,2.),6.0)-3.0)-
   });
   let mouthOpen = 0, mouthTarget = 0, blinkT = -1, nextBlink = 2 + Math.random() * 3;
   const api = {
-    head, horn, eyes, mouth, meshes,
+    head, horn, eyes, mouth, jaw, blush, meshes,
     neck: UNICORN.bones.neck.map(bone),
     ears: { L: UNICORN.bones.earL.map(bone), R: UNICORN.bones.earR.map(bone) },
     tail: UNICORN.bones.tail.map(bone),
@@ -118,6 +144,7 @@ vec3 uniRainbow(float h){ vec3 k = clamp(abs(mod(h*6.0+vec3(0.,4.,2.),6.0)-3.0)-
       applyScales();
       mouthOpen += (mouthTarget - mouthOpen) * Math.min(1, dt * 25);
       inner.scale.z = 0.001 + M.height * mouthOpen;
+      jaw.position.z = -M.height * 0.2 - 0.08 * mouthOpen;
       mouth.visible = mouthOpen > 0.03;
       if (api.autoBlink && (nextBlink -= dt) <= 0) { blinkT = 0; nextBlink = 2.5 + Math.random() * 4; }
       if (blinkT >= 0) {

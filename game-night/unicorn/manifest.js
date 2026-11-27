@@ -9,7 +9,7 @@ export const UNICORN = {
   // Native size: ~4.8 units tall (ears), ~5.7 long, 1.4 wide. Faces +Z, up +Y, hooves at y = 0.
   scaleTo1: 1 / 4.8,          // multiply to make it 1 unit tall; 0.33 gives ~1.6 m which suits the meadow scales below
   facing: '+Z',
-  frontYaw: -0.5,             // a 3/4 view toward a camera on +Z reads best (rotation.y in radians)
+  frontYaw: -0.4,             // a 3/4 view toward a camera on +Z reads best (rotation.y in radians)
   // Camera hint for a portrait phone (fov 40, unicorn scaled 0.33 at origin): pos (0, 1.3, 5.2) look at (0, 1.0, 0).
   // Head close-up (with frontYaw): pos (0.15, 1.6, 2.7) look at (-0.35, 1.35, 0.7).
   camera: { portrait: { pos: [0, 1.3, 5.2], look: [0, 1.0, 0] }, close: { pos: [0.15, 1.6, 2.7], look: [-0.35, 1.35, 0.7] } },
@@ -50,7 +50,7 @@ export const UNICORN = {
   // +X toward the unicorn's right side (world -X). To nod "yes" rotate Head about local X; tilt = local Y; turn = local Z.
   headLocal: {
     eyes: [[-0.245, 0.34, 0.208], [0.245, 0.34, 0.208]],
-    mouth: [0, 1.02, -0.11],
+    mouth: [0, 1.07, -0.06],
     snoutTip: [0, 1.11, -0.05],
     forehead: [0, 0.28, 0.3],
     // tap zones (sphere centre in head-local coords, radius) – the horn is the Horn mesh itself
@@ -62,17 +62,18 @@ export const UNICORN = {
   colors: {
     Main: '#fff3fb', Main_Light: '#e8dcff', Hooves: '#ffd36e', Hair: '#ffb3e6', Muzzle: '#ffc2dc',
     Eye_White: '#ffffff', Eye_Black: '#2a1840',
-    eye: '#2a1840', horn: '#ffcf6b', hornGlow: '#ffc8ee', mouth: '#b2386e', tongue: '#ff8fb8',
+    eye: '#2a1840', horn: '#ffc847', hornEmissive: '#ffb84a', blush: '#ff8fbf', hornGlow: '#ffc8ee', mouth: '#b2386e', tongue: '#ff8fb8',
     rainbow: ['#ff9ad5', '#ffc48a', '#fff08a', '#a8f0a0', '#8fd8ff', '#c9a8ff'],
     sky: '#cfe6fb', fog: '#d6e8f7', grass: '#9ad77d', grassDark: '#6fbf5a',
     ui: { pink: '#ff7ac8', lilac: '#b98cff', mint: '#7fe0c4', cream: '#fff6e8' },
   },
   // Defaults used by applyUnicornLook (unicorn-look.js); any of them can be overridden there.
   look: {
-    headScale: 1.5, neckScale: 0.85, overlayEyes: true, rainbowMane: true, maneSaturation: 0.7, maneBands: 0.9, maneHueShift: 0.73,
+    headScale: 1.85, neckScale: 0.8, overlayEyes: true, rainbowMane: true, maneSaturation: 1.0, maneBands: 0.9, maneHueShift: 0.73,
     horn: { length: 0.75, radius: 0.1, twists: 3, pos: [0, 0.28, 0.3], dir: [0, 0.15, 1] },
-    eyes: { radius: 0.085, flatten: 0.55 },
-    mouth: { width: 0.1, depth: 0.07, height: 0.12 },
+    eyes: { radius: 0.13, flatten: 0.55 },
+    blush: { radius: 0.085, opacity: 0.5, pos: [0.29, 0.56, 0.06] },
+    mouth: { width: 0.17, depth: 0.1, height: 0.2 },
   },
 };
 

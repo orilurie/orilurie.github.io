@@ -22,7 +22,7 @@ fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' })
 const ASSETS = 'unicorn/';
 const SFX_NAMES = ['giggle', 'pop', 'sparkle', 'munch', 'bonk', 'snore'];
 const SFX_EXT = ['mp3', 'ogg', 'wav'];       // first one that loads wins
-const MUSIC_FILES = ['music.mp3', 'music.ogg', 'sfx/music.mp3', 'sfx/music.ogg'];
+const MUSIC_FILES = ['music/loop2.mp3', 'music/loop.mp3', 'music.mp3'];
 const SLEEP_AFTER_MS = 40000;
 const CLIP_MAX_MS = 15000;
 const DOUBLE_TAP_MS = 320;
@@ -105,6 +105,7 @@ function synth(name) {
   o.frequency.setValueAtTime(f[0], t); o.frequency.exponentialRampToValueAtTime(f[1], t + 0.15);
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
   o.connect(g).connect(sfxBus); o.start(t); o.stop(t + 0.25);
+  voice.holdOff && voice.holdOff(0.5);
 }
 function sfx(name, vol = 1, rate = 1) {
   if (!SET.sound) return;
@@ -114,6 +115,7 @@ function sfx(name, vol = 1, rate = 1) {
   const s = ctx.createBufferSource(); s.buffer = b; s.playbackRate.value = rate * (0.94 + Math.random() * 0.12);
   const g = ctx.createGain(); g.gain.value = vol;
   s.connect(g).connect(sfxBus); s.start();
+  voice.holdOff && voice.holdOff(b.duration / s.playbackRate.value + 0.3);
 }
 let musicProbed = false;
 async function setupMusic() {
@@ -121,7 +123,7 @@ async function setupMusic() {
   musicProbed = true;
   for (const f of MUSIC_FILES) {
     try { const r = await fetch(`${ASSETS}${f}?v=${VERSION}`, { method: 'HEAD' }); if (!r.ok) continue; } catch { continue; }
-    musicEl = new Audio(`${ASSETS}${f}?v=${VERSION}`); musicEl.loop = true; musicEl.crossOrigin = 'anonymous';
+    musicEl = new Audio(); musicEl.preload = 'none'; musicEl.src = `${ASSETS}${f}?v=${VERSION}`; musicEl.loop = true; musicEl.crossOrigin = 'anonymous';
     const ctx = ensureBus();
     if (ctx) {
       try { musicSrc = ctx.createMediaElementSource(musicEl); musicGain = ctx.createGain(); musicGain.gain.value = 0.18; musicSrc.connect(musicGain).connect(ctx.destination); }
@@ -134,9 +136,10 @@ async function setupMusic() {
 }
 function syncMusic() {
   if (!musicEl) return;
-  const on = SET.music && voiceState !== 'talking' && voiceState !== 'hearing' && !document.hidden;
+  // music plays only while the mic is off: the mic would hear it (no echo cancellation) and repeat it
+  const on = SET.music && !micWanted && !document.hidden && voiceState !== 'talking' && voiceState !== 'hearing';
   if (musicGain) musicGain.gain.setTargetAtTime(on ? 0.18 : 0, musicGain.context.currentTime, 0.3);
-  if (SET.music && !document.hidden) musicEl.play().catch(() => {}); else musicEl.pause();
+  if (on) musicEl.play().catch(() => {}); else if (!musicGain || !SET.music || micWanted || document.hidden) musicEl.pause();
 }
 
 // ---------------------------------------------------------------- scene
@@ -202,7 +205,7 @@ function onVoiceState(s, info) {
   $mic.classList.toggle('hearing', s === 'hearing');
   $mic.classList.toggle('talking', s === 'talking');
   if (s === 'hearing') {
-    poke();
+    poke(); coachHeard = true;
     if (sceneState !== 'sleeping') setScene('listening');
     status('👂 ניצנוץ מקשיב…');
   } else if (s === 'talking') {
@@ -225,6 +228,7 @@ function onVoiceState(s, info) {
     toast(r === 'unsupported' ? 'הדפדפן הזה לא תומך במיקרופון – אבל אפשר ללטף ולהאכיל את ניצנוץ 💖'
       : r === 'nodevice' ? 'לא מצאנו מיקרופון 🎤 – אפשר עדיין לשחק עם ניצנוץ'
       : r === 'ended' ? 'המיקרופון התנתק – לחצו על 🎤 כדי לחבר מחדש'
+      : r === 'busy' ? 'המיקרופון תפוס באפליקציה אחרת – סגרו אותה ולחצו 🎤'
       : r === 'denied' ? 'בלי מיקרופון ניצנוץ לא שומע 🙉 אפשר לאשר בהגדרות הדפדפן – ובינתיים ללטף אותו!'
       : 'משהו השתבש עם המיקרופון – נסו שוב', 5200);
   }
@@ -253,7 +257,7 @@ const REACT = {
 };
 let lastHit = 0, lastBonk = 0;
 function onHit(h) {
-  poke();
+  poke(); coachDone();
   const now = performance.now();
   if (now - lastHit < DOUBLE_TAP_MS) { lastHit = 0; bonk(); return; }
   lastHit = now;
@@ -312,11 +316,34 @@ function addHeart(d) {
 setInterval(() => { if (!document.hidden && hearts > 1) addHeart(-0.1); }, 30000);
 renderHearts();
 
+// ---------------------------------------------------------------- first-run coach mark (tap the unicorn)
+let coachEl = null, coachT = 0, coachHeard = false, coachRaf = 0;
+function coachDone() {
+  clearTimeout(coachT); cancelAnimationFrame(coachRaf);
+  if (coachEl) { coachEl.remove(); coachEl = null; store.set('uni-coached', '1'); status(''); }
+}
+function headPos() {
+  try { const p = scene && scene.raw && scene.raw.partAt && scene.raw.partAt('head'); if (p && isFinite(p.x) && isFinite(p.y)) return p; } catch {}
+  const r = $stage.getBoundingClientRect(); return { x: r.width / 2, y: r.height * 0.4 };
+}
+function coachMaybe() {
+  if (store.get('uni-coached') === '1') return;
+  coachT = setTimeout(() => {
+    if (coachHeard || sceneState === 'sleeping' || !scene || document.body.dataset.screen !== 'main') { if (!coachHeard) coachMaybe(); return; }
+    coachEl = document.createElement('div'); coachEl.className = 'coach'; coachEl.setAttribute('aria-hidden', 'true'); coachEl.textContent = '👆';
+    document.body.appendChild(coachEl);
+    const follow = () => { if (!coachEl) return; const p = headPos(); coachEl.style.left = `${p.x}px`; coachEl.style.top = `${p.y}px`; coachRaf = requestAnimationFrame(follow); };
+    follow();
+    status('לטפו את ניצנוץ על הראש, הבטן או הקרן ✨', 9000);
+    coachT = setTimeout(() => { if (coachEl) { coachEl.remove(); coachEl = null; cancelAnimationFrame(coachRaf); } }, 9000);
+  }, 5000);
+}
+
 // ---------------------------------------------------------------- mic toggle
 $mic.addEventListener('click', () => {
   poke();
-  if (micWanted) { micWanted = false; voice.stop(); setMic(false); status('🎤 המיקרופון כבוי', 1500); return; }
-  micWanted = true; setMic(true);
+  if (micWanted) { micWanted = false; voice.stop(); setMic(false); status('🎤 המיקרופון כבוי', 1500); syncMusic(); return; }
+  micWanted = true; setMic(true); syncMusic();
   voice.start().then((ok) => { if (!ok) { micWanted = false; setMic(false, true); } });
 });
 
@@ -356,6 +383,7 @@ function startClip() {
     const type = (mr.mimeType || mime || 'video/webm').split(';')[0];
     showClip(new Blob(chunks, { type }));
   };
+  try { scene && scene.raw && scene.raw.lockResolution && scene.raw.lockResolution(true); } catch {}
   mr.start(250);
   const t0 = performance.now();
   recording = { mr, t0, timer: setTimeout(stopClip, CLIP_MAX_MS), tick: setInterval(() => status(`🔴 מקליטים… ${Math.ceil((CLIP_MAX_MS - (performance.now() - t0)) / 1000)}`), 250) };
@@ -366,6 +394,7 @@ function startClip() {
 function stopClip() {
   if (!recording) return;
   const r = recording; recording = null;
+  try { scene && scene.raw && scene.raw.lockResolution && scene.raw.lockResolution(false); } catch {}
   clearTimeout(r.timer); clearInterval(r.tick); status('');
   $rec.setAttribute('aria-pressed', 'false'); $rec.querySelector('.al').textContent = 'סרטון';
   try { r.mr.state !== 'inactive' && r.mr.stop(); } catch {}
@@ -384,7 +413,7 @@ function showClip(blob) {
   try { file = new File([blob], name, { type: blob.type }); } catch {}
   share.hidden = !(file && navigator.canShare && navigator.canShare({ files: [file] }));
   share.onclick = () => navigator.share({ files: [file], title: 'ניצנוץ', text: 'תראו מה ניצנוץ אמר! 🦄' }).catch(() => {});
-  $clip.hidden = false;
+  $clip.hidden = false; $toast.classList.remove('show');
   v.play().catch(() => {});
 }
 $rec.addEventListener('click', () => { poke(); recording ? stopClip() : startClip(); });
@@ -399,7 +428,7 @@ function syncSettingsUI() {
 }
 function openSettings(open) {
   $settings.hidden = !open; $('#btn-settings').setAttribute('aria-expanded', String(open));
-  if (open) syncSettingsUI();
+  if (open) { syncSettingsUI(); $toast.classList.remove('show'); }
 }
 $('#btn-settings').addEventListener('click', () => openSettings($settings.hidden));
 $('#btn-close-settings').addEventListener('click', () => openSettings(false));
@@ -410,7 +439,10 @@ $sound.addEventListener('change', () => {
   if (sfxBus) sfxBus.gain.value = SET.sound ? 0.8 : 0;
   if (SET.sound) sfx('pop', 0.6);
 });
-$music.addEventListener('change', () => { SET.music = $music.checked; saveSet(); setupMusic().then(syncMusic); });
+$music.addEventListener('change', () => {
+  SET.music = $music.checked; saveSet(); setupMusic().then(syncMusic);
+  if (SET.music && micWanted) toast('🎵 המוזיקה מתנגנת רק כשהמיקרופון כבוי', 2600);
+});
 $quality.addEventListener('click', (e) => {
   const b = e.target.closest('[data-q]'); if (!b || b.dataset.q === SET.quality) return;
   SET.quality = b.dataset.q; saveSet(); syncSettingsUI();
@@ -435,6 +467,8 @@ document.addEventListener('visibilitychange', () => {
     lastActive = performance.now();
     const ctx = audioCtx(); if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
     syncMusic();
+    // iOS may leave the context 'interrupted' until a tap: say so instead of looking deaf
+    setTimeout(() => { const c = audioCtx(); if (micWanted && c && c.state !== 'running') status('👆 געו במסך כדי להעיר את ניצנוץ', 4000); }, 600);
   }
 });
 // iOS may suspend the context after an interruption; any tap resumes it.
@@ -462,6 +496,8 @@ $go.addEventListener('click', async () => {
   $start.hidden = true; $top.hidden = false; $bar.hidden = false; $status.hidden = false;
   scene.resize(); poke();
   scene.react('wake');
+  $chips.querySelector('[aria-checked="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  coachMaybe();
   micP.then((ok) => { if (ok) status('🎤 דברו אל ניצנוץ – הוא יחזור אחריכם!', 3500); else if (micWanted) { micWanted = false; setMic(false, true); } });
 });
 
@@ -469,6 +505,6 @@ if (debugOn) {
   window.__uni = {
     VERSION, SET, voice, get scene() { return scene; }, get sceneState() { return sceneState; }, get voiceState() { return voiceState; },
     get hearts() { return hearts; }, sfx, sfxBuf, onHit, bonk, wake, toast, status, startClip, stopClip,
-    sleepNow() { lastActive = -1e9; }, remountScene,
+    sleepNow() { lastActive = -1e9; }, remountScene, coachDone, get coachEl() { return coachEl; },
   };
 }

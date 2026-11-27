@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="unicorn.css?v=55">
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
 </head>
 <body class="uni" data-screen="start">
 <div id="sky" aria-hidden="true"><i class="cloud c1"></i><i class="cloud c2"></i><i class="cloud c3"></i></div>
@@ -55,7 +56,7 @@
   <div class="sheet-card">
     <h2>הגדרות</h2>
     <label class="row"><span>🔊 צלילים</span><input type="checkbox" id="set-sound" class="sw"></label>
-    <label class="row"><span>🎵 מוזיקה</span><input type="checkbox" id="set-music" class="sw"></label>
+    <label class="row"><span>🎵 מוזיקה <small style="font-weight:500;opacity:.7">(כשהמיקרופון כבוי)</small></span><input type="checkbox" id="set-music" class="sw"></label>
     <div class="row"><span>✨ איכות גרפיקה</span>
       <div class="seg" id="set-quality" role="radiogroup">
         <button type="button" data-q="low">חסכונית</button><button type="button" data-q="high">מלאה</button>

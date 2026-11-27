@@ -486,7 +486,7 @@ function renderHome() {
         <a class="game-card gc-dungeon" href="dungeon.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🐉</span><img class="gc-art" src="art/dragon.png" alt=""><b>המבוך</b><small>הרפתקה – לבד או עם חברים</small></a>
         <a class="game-card gc-arena" href="arena.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🔫</span><img class="gc-art" src="art/pistol.png" alt=""><b>זירה</b><small>יריות בזמן אמת</small></a>
         <a class="game-card gc-flip" href="flip.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🙃</span><img class="gc-art" src="flip/ui/char_green_front.png" alt=""><b>עולם הפוך</b><small>מטים את הטלפון – הכבידה מתהפכת</small></a>
-        <a class="game-card gc-unicorn" href="unicorn.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🦄</span><img class="gc-art" src="unicorn/tile.png" alt="" onerror="this.parentNode.classList.add('noart');this.remove()"><b>ניצנוץ</b><small>חד־קרן מדבר – חוזר אחריכם בקול מצחיק</small></a>
+        <a class="game-card gc-unicorn" href="unicorn.html${debugOn ? '?debug=1' : ''}"><span class="gc-icon">🦄</span><img class="gc-art" src="unicorn/sprites/unicorn.webp" alt="" onerror="this.parentNode.classList.add('noart');this.remove()"><b>ניצנוץ</b><small>חד־קרן מדבר – חוזר אחריכם בקול מצחיק</small></a>
       </div>`;
   const joinBox = `
       <div class="or">יש לכם קוד חדר? (המשחק נקבע לפי החדר)</div>

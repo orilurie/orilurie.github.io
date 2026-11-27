@@ -75,7 +75,7 @@ body[data-screen="start"] #stage { filter: saturate(.85) blur(1px); pointer-even
 .topbar > * { pointer-events: auto; }
 .home-link { display: inline-flex; align-items: center; gap: 6px; height: 48px; padding: 0 16px; border-radius: 999px; background: var(--glass);
   border: 2px solid var(--glass-line); color: var(--ink); font-weight: 700; font-size: 1rem; text-decoration: none; box-shadow: var(--shadow); white-space: nowrap; }
-.home-link.small { height: 40px; font-size: .9rem; box-shadow: none; }
+.home-link.small { height: 44px; font-size: .9rem; box-shadow: none; }
 .bb-arrow { font-size: 1.15rem; line-height: 1; }
 .ibtn { width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--glass-line); background: var(--glass); font-size: 1.3rem; box-shadow: var(--shadow); }
 .ibtn:active, .home-link:active { transform: translateY(2px); }
@@ -94,7 +94,7 @@ body[data-screen="start"] #stage { filter: saturate(.85) blur(1px); pointer-even
 .bottombar { position: fixed; z-index: 5; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 8px; align-items: center;
   padding: 0 calc(10px + var(--sa-r)) calc(10px + var(--sa-b)) calc(10px + var(--sa-l)); pointer-events: none; }
 .bottombar > * { pointer-events: auto; }
-.chips { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 4px 4px 6px; scroll-snap-type: x proximity; scrollbar-width: none;
+.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 100%; overflow: visible; padding: 4px 4px 6px; scroll-snap-type: x proximity; scrollbar-width: none;
   -webkit-overflow-scrolling: touch; }
 .chips::-webkit-scrollbar { display: none; }
 .chip { flex: 0 0 auto; scroll-snap-align: center; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 999px;
@@ -140,7 +140,7 @@ body[data-screen="start"] #stage { filter: saturate(.85) blur(1px); pointer-even
 .sw:checked { background: linear-gradient(135deg, var(--pink), var(--lilac)); }
 .sw:checked::after { right: 28px; }
 .seg { display: flex; border-radius: 999px; background: #efe7f7; padding: 3px; }
-.seg button { border: 0; background: none; min-height: 40px; padding: 0 14px; border-radius: 999px; font-weight: 700; }
+.seg button { border: 0; background: none; min-height: 44px; padding: 0 14px; border-radius: 999px; font-weight: 700; }
 .seg button[aria-checked="true"] { background: #fff; box-shadow: 0 2px 6px rgba(122, 79, 150, .2); color: var(--lilac-d); }
 .credits { margin: 14px 0 4px; font-size: .85rem; }
 .credits a { color: var(--ink-2); }
@@ -154,11 +154,28 @@ body[data-screen="start"] #stage { filter: saturate(.85) blur(1px); pointer-even
   padding: 12px 20px; border-radius: 18px; background: var(--ink); color: #fff; font-weight: 700; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, .3);
   transition: transform .35s cubic-bezier(.2, 1.4, .4, 1), opacity .25s; pointer-events: none; opacity: 0; }
 #toast.show { transform: translate(-50%, 0); opacity: 1; }
+/* a sheet is open: the toast moves to the bottom so it never covers the sheet's title/rows */
+body:has(.sheet:not([hidden])) #toast { top: auto; bottom: calc(16px + var(--sa-b)); transform: translate(-50%, 30px); }
+body:has(.sheet:not([hidden])) #toast.show { transform: translate(-50%, 0); }
+
+/* ---------- first-run coach mark ---------- */
+.coach { position: fixed; z-index: 6; font-size: 3rem; line-height: 1; pointer-events: none; transform: translate(-30%, -10%);
+  filter: drop-shadow(0 4px 6px rgba(74, 44, 94, .35)); animation: coach-bob .9s ease-in-out infinite; }
+@keyframes coach-bob { 50% { translate: 0 -14px; } }
+
+/* ---------- portrait phones: all 6 voice chips visible (3 + 3) ---------- */
+@media (orientation: portrait) and (max-width: 480px) {
+  .chips { flex-wrap: wrap; justify-content: center; overflow: visible; padding: 4px 0 2px; gap: 6px 6px; }
+  .chip { min-height: 44px; padding: 0 10px; font-size: .95rem; gap: 4px; }
+  .chip .ce { font-size: 1.1rem; }
+}
 
 /* ---------- landscape phones: chips beside the action buttons ---------- */
 @media (orientation: landscape) and (max-height: 520px) {
   .bottombar { flex-direction: row; justify-content: space-between; align-items: flex-end; }
-  .chips { flex: 1 1 auto; max-width: 50%; order: 2; }
+  .chips { flex: 1 1 auto; max-width: 50%; order: 2; flex-wrap: wrap; justify-content: center; overflow: visible; gap: 6px; padding: 2px 0; }
+  .chip { padding: 0 10px; font-size: .95rem; gap: 4px; }
+  .chip .ce { font-size: 1.1rem; }
   .actions { order: 1; gap: 16px; }
   .act { width: 58px; height: 58px; }
   .mic { width: 74px; height: 74px; font-size: 2rem; }
