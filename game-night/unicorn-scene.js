@@ -431,7 +431,7 @@ export async function createScene(container, opts = {}) {
 
   // ------------------------------------------------------------------ framing / camera
   let W = 1, H = 1;
-  const frame = { target: new V3(-0.22, 0.86, 0.1), dist: 5.2, elev: 0.16 };
+  const frame = { target: new V3(-0.3, 0.86, 0.1), dist: 5.2, elev: 0.16 };
   function resize() {
     W = Math.max(1, container.clientWidth || window.innerWidth);
     H = Math.max(1, container.clientHeight || window.innerHeight);
@@ -442,7 +442,7 @@ export async function createScene(container, opts = {}) {
     const top = 62, bot = landscape ? 110 : (W < 500 ? 214 : 180);   // portrait phones: chips wrap 3+3
     const safeH = Math.max(120, H - top - bot);
     const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    const uniH = 1.8, uniW = 1.5;                           // horn tip to hooves, apparent width at 3/4 view (+ margin)
+    const uniH = 1.8, uniW = 1.65;                          // horn tip to hooves, apparent width at 3/4 view (+ margin)
     const dV = (uniH * H) / ((landscape ? 0.95 : 0.95) * safeH * 2 * tan);
     const dH = uniW / (0.92 * 2 * tan * camera.aspect);
     frame.dist = clamp(Math.max(dV, dH), 3.2, landscape ? 6 : 9);

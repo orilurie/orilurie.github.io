@@ -2,11 +2,11 @@
 // Screens (hash routes): #  title · #setup controls & sensors · #worlds · #w/<n> level grid · #play/<id> · #howto · #settings
 // Owns: TiltSource (DeviceOrientation → screen-space tilt vector), progress, settings, menu audio, in-level overlays.
 // The engine (flip-engine.js) only sees tilt.read() → {x,y}.
-import { startLevel, preloadAll } from './flip-engine.js?v=54';
-import { WORLDS } from './flip-levels.js?v=54';
-import * as M from './flip/manifest.js?v=54';
+import { startLevel, preloadAll } from './flip-engine.js?v=55';
+import { WORLDS } from './flip-levels.js?v=55';
+import * as M from './flip/manifest.js?v=55';
 
-export const VERSION = 54;
+export const VERSION = 55;
 const params = new URLSearchParams(location.search);
 const debugOn = params.get('debug') === '1';
 

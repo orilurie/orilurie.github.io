@@ -2,11 +2,11 @@
 // The run lives on the game server (arena-server/, class Dungeon); this file draws it, predicts
 // your own movement (same step model as the arena) and sends your input.
 
-import * as core from './dungeon-core.js?v=54';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=54';
-import { sound, addSounds } from './arena-audio.js?v=54';
-import * as gfx from './arena-gfx.js?v=54';
-import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=54';
+import * as core from './dungeon-core.js?v=55';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=55';
+import { sound, addSounds } from './arena-audio.js?v=55';
+import * as gfx from './arena-gfx.js?v=55';
+import { gfxMode, setGfxMode, isRich } from './gfx-mode.js?v=55';
 
 const { T, CW, CH, RW, RH, DASH, INTERP_MS, ITEMS, ITEM_LIST, ENEMIES, ENEMY_LIST, MAX_PLAYERS, genFloor, solids, move, roomAt, blocked } = core;
 // v2 tables from the core (with a fallback so an older core never breaks the page)
@@ -23,10 +23,10 @@ const hero = h => HEROES[((h | 0) % HEROES.length + HEROES.length) % HEROES.leng
 
 // menus (hero picker, gems, daily leaderboard, admin panel) – loaded on the side so a problem there never breaks the game
 let menus = null;
-import('./dungeon-menus.js?v=54').then(m => { menus = m; if (ui.screen !== 'room' || meta?.phase === 'lobby') render(); }).catch(() => {});
+import('./dungeon-menus.js?v=55').then(m => { menus = m; if (ui.screen !== 'room' || meta?.phase === 'lobby') render(); }).catch(() => {});
 const isAdmin = () => (menus ? menus.isAdminName(ui.name) : false);
 
-export const VERSION = 54;
+export const VERSION = 55;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');

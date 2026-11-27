@@ -157,6 +157,10 @@ body[data-screen="start"] #stage { filter: saturate(.85) blur(1px); pointer-even
 /* a sheet is open: the toast moves to the bottom so it never covers the sheet's title/rows */
 body:has(.sheet:not([hidden])) #toast { top: auto; bottom: calc(16px + var(--sa-b)); transform: translate(-50%, 30px); }
 body:has(.sheet:not([hidden])) #toast.show { transform: translate(-50%, 0); }
+@media (orientation: landscape) and (max-height: 520px) {   /* the sheet fills the height: use the side gutter */
+  body:has(.sheet:not([hidden])) #toast { left: calc(10px + var(--sa-l)); max-width: max(140px, calc(50vw - 215px)); transform: translate(0, 30px); }
+  body:has(.sheet:not([hidden])) #toast.show { transform: translate(0, 0); }
+}
 
 /* ---------- first-run coach mark ---------- */
 .coach { position: fixed; z-index: 6; font-size: 3rem; line-height: 1; pointer-events: none; transform: translate(-30%, -10%);

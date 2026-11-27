@@ -5,16 +5,16 @@
 import {
   W, H, R, FIRE_CD, MAX_HP, MAPS, COLORS, INTERP_MS, PICKUPS, MAX_PLAYERS, BULLET_R, DMG, FOV, VIEW_RANGE, NEAR,
   move, shotBullets, stepBullet, blocked, rayDist, WEAPONS, WEAPON_LIST, DASH, inBush, GRENADE, PROPS, propRect,
-} from './arena-core.js?v=54';
-import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=54';
-import * as gfx from './arena-gfx.js?v=54';
-import { gfxMode, setGfxMode } from './gfx-mode.js?v=54';
-import { sound } from './arena-audio.js?v=54';
+} from './arena-core.js?v=55';
+import { play, haptic, settings as sfxSettings, toggle as toggleSfx } from './sfx.js?v=55';
+import * as gfx from './arena-gfx.js?v=55';
+import { gfxMode, setGfxMode } from './gfx-mode.js?v=55';
+import { sound } from './arena-audio.js?v=55';
 // where you hear from: you, or the camera while you're out
 const ear = () => (me && !me.dead ? me : { x: view.x, y: view.y });
 const heardAt = (x, y) => ({ at: { x, y }, listener: ear() });
 
-export const VERSION = 54;
+export const VERSION = 55;
 const params = new URLSearchParams(location.search);
 const SERVER = params.get('server') || 'https://arena.hathatul.workers.dev';
 const WS_URL = SERVER.replace(/^http/, 'ws');

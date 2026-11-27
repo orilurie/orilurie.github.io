@@ -632,7 +632,7 @@ export function createVoice({ onState = () => {}, onLevel = () => {}, onMicLevel
     get captureNode() { ensureCtx(); return streamDest; },
     get hasRecording() { return !!lastRaw; },
     recorderMime: pickRecorderMime,
-    _debug: { get lastRaw() { return lastRaw; }, lastOut: null, get floor() { return floor; }, processVoice, trackPitch },
+    _debug: { get dspMode() { return dspWorker ? 'worker' : dspFailed ? 'main-thread' : 'unused'; }, get lastRaw() { return lastRaw; }, lastOut: null, get floor() { return floor; }, processVoice, trackPitch },
   };
   return voice;
 }

@@ -10,7 +10,7 @@
 // - Terrain: Phaser Tilemap built from an autotiled, edge-extruded tileset generated once per theme.
 // - Three cameras: background (screen space, parallax TileSprites), world (zoom + follow), HUD (screen space).
 
-import * as M from './flip/manifest.js?v=54';
+import * as M from './flip/manifest.js?v=55';
 
 const T = 64;                         // world px per tile
 const GRAV = 1400;                    // px/s²
