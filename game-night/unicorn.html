@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ניצנוץ – חד־קרן מדבר</title>
+<meta name="description" content="ניצנוץ – חד־קרן מדבר שחוזר על מה שאומרים לו בקול מצחיק">
+<link rel="icon" type="image/png" href="icons/favicon-64.png?v=55">
+<link rel="manifest" href="manifest.webmanifest?v=55">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=55">
+<meta name="theme-color" content="#f7c6e6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="unicorn.css?v=55">
+</head>
+<body class="uni" data-screen="start">
+<div id="sky" aria-hidden="true"><i class="cloud c1"></i><i class="cloud c2"></i><i class="cloud c3"></i></div>
+
+<!-- the 3D/2D scene mounts here (unicorn-scene.js) -->
+<div id="stage" aria-label="ניצנוץ – לחצו על הראש, הבטן או הקרן"></div>
+
+<!-- start screen -->
+<section id="start" class="screen">
+  <div class="start-card">
+    <h1 class="start-title"><span class="st-emoji" aria-hidden="true">🦄</span>ניצנוץ</h1>
+    <p class="start-sub">חד־קרן קסום שחוזר על כל מה שאומרים לו – בקול מצחיק!</p>
+    <button id="go" class="big-btn" type="button">בואו נדבר עם ניצנוץ <span aria-hidden="true">✨</span></button>
+    <p class="start-hint">נבקש רשות להשתמש במיקרופון. אפשר גם רק ללטף 💖</p>
+    <a class="home-link small" href="./">→ לכל המשחקים</a>
+  </div>
+  <div id="loading" class="loading" hidden><span class="spinner"></span> ניצנוץ מתעורר…</div>
+</section>
+
+<!-- main view -->
+<header id="top" class="topbar" hidden>
+  <a class="home-link" id="home" href="./"><span class="bb-arrow">→</span> משחקים</a>
+  <div class="hearts" id="hearts" role="meter" aria-label="מצב רוח" aria-valuemin="0" aria-valuemax="5" aria-valuenow="3"></div>
+  <button class="ibtn" id="btn-settings" type="button" aria-label="הגדרות" aria-expanded="false">⚙️</button>
+</header>
+
+<div id="status" class="status" hidden aria-live="polite"></div>
+
+<nav id="bar" class="bottombar" hidden>
+  <div class="chips" id="chips" role="radiogroup" aria-label="סגנון קול"></div>
+  <div class="actions">
+    <button class="act" id="btn-feed" type="button" aria-label="להאכיל"><span class="ai">🧁</span><span class="al">אוכל</span></button>
+    <button class="mic" id="btn-mic" type="button" aria-pressed="false" aria-label="מיקרופון"><span class="ring" aria-hidden="true"></span><span class="mi">🎤</span></button>
+    <button class="act" id="btn-rec" type="button" aria-pressed="false" aria-label="הקלטת סרטון"><span class="ai">🎥</span><span class="al">סרטון</span></button>
+  </div>
+</nav>
+
+<div id="settings" class="sheet" hidden role="dialog" aria-label="הגדרות">
+  <div class="sheet-card">
+    <h2>הגדרות</h2>
+    <label class="row"><span>🔊 צלילים</span><input type="checkbox" id="set-sound" class="sw"></label>
+    <label class="row"><span>🎵 מוזיקה</span><input type="checkbox" id="set-music" class="sw"></label>
+    <div class="row"><span>✨ איכות גרפיקה</span>
+      <div class="seg" id="set-quality" role="radiogroup">
+        <button type="button" data-q="low">חסכונית</button><button type="button" data-q="high">מלאה</button>
+      </div>
+    </div>
+    <p class="credits"><a href="unicorn/CREDITS.txt" target="_blank" rel="noopener">קרדיטים לאמנות ולצלילים</a></p>
+    <p class="version" id="version"></p>
+    <button class="big-btn small" id="btn-close-settings" type="button">סגירה</button>
+  </div>
+</div>
+
+<div id="clip" class="sheet" hidden role="dialog" aria-label="הסרטון מוכן">
+  <div class="sheet-card">
+    <h2>הסרטון מוכן! 🎬</h2>
+    <video id="clip-video" playsinline controls></video>
+    <div class="clip-actions">
+      <button class="big-btn small" id="btn-share" type="button" hidden>שיתוף 📤</button>
+      <a class="big-btn small alt" id="btn-download" download>שמירה 💾</a>
+    </div>
+    <button class="link-btn" id="btn-close-clip" type="button">סגירה</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript><p style="padding:20px">צריך JavaScript כדי לשחק עם ניצנוץ.</p></noscript>
+<script type="module" src="unicorn-ui.js?v=55"></script>
+</body>
+</html>

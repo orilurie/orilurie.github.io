@@ -1,0 +1,8 @@
+Creative Commons Zero v1.0 Universal (CC0 1.0) – Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The authors listed in CREDITS.txt (Quaternius, Kenney, Poly Haven, and the freesound.org users named there)
+dedicated these works to the public domain by waiving all of their rights to the work worldwide under
+copyright law, including all related and neighbouring rights, to the extent allowed by law.
+You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
+Full legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode

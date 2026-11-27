@@ -691,6 +691,10 @@ html[data-gfx="rich"] .game-card.gc-arena { background: linear-gradient(145deg, 
 html[data-gfx="rich"] .game-card.gc-flip { background: linear-gradient(145deg, #5fb4ff, #2a6fd6); }
 html[data-gfx="rich"] .game-card.gc-flip .gc-art { transform: rotate(180deg); }
 html[data-gfx="rich"] .game-card.gc-flip:hover .gc-art { transform: rotate(0deg) scale(1.1); }
+.game-card.gc-unicorn { grid-column: 1 / -1; }
+html[data-gfx="rich"] .game-card.gc-unicorn { background: linear-gradient(145deg, #ff9ad5, #a77bff 55%, #6fc8ff); }
+html[data-gfx="rich"] .game-card.gc-unicorn.noart .gc-icon { display: block; font-size: 52px; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .25)); }
+html[data-gfx="rich"] .game-card.gc-unicorn:hover .gc-art { transform: scale(1.12) rotate(6deg); }
 html[data-gfx="rich"] .game-card::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 30% 10%, rgba(255, 255, 255, .28), transparent 55%); pointer-events: none; }
 
 /* felt table */

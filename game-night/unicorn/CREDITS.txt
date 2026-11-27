@@ -1,0 +1,49 @@
+ניצנוץ (the talking unicorn) – asset credits
+=============================================
+All assets below are free to use. CC0 = public domain (LICENSE-CC0.txt); MIT = LICENSE-fluent-emoji.txt.
+Everything was resized, trimmed, recoloured or repacked for the web; the originals are credited here.
+
+3D models (models/)
+- unicorn.glb – "Horse_White" from "Ultimate Animated Animals" (July 2021) by Quaternius – CC0
+  https://quaternius.com/packs/ultimateanimatedanimals.html
+  Recoloured to pastel, constant animation channels removed, glTF -> GLB. The horn, eyes, mouth and rainbow mane
+  are added in code by unicorn-look.js.
+- nature.glb – flowers, grass, clover, fern, bushes and a tree from "Stylized Nature MegaKit" by Quaternius – CC0
+  https://quaternius.com/packs/stylizednaturemegakit.html  (textures downscaled, normal maps dropped)
+- props.glb – cupcake, donut, lollypop, strawberry, cookie, candy bar, apple, carrot from "Food Kit" by Kenney – CC0,
+  heart, star, jewel, gold coin from "Platformer Kit" by Kenney – CC0   https://kenney.nl
+
+Background (bg/)
+- sky.jpg – "Kloofendal 48d Partly Cloudy (Pure Sky)" by Greg Zaal (sky edits Jarod Guest) / Poly Haven – CC0
+  https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky  (tonemapped JPG, 2048x1024, lower half hazed)
+
+Sprites (sprites/) – Microsoft Fluent Emoji (3D style), MIT licence (LICENSE-fluent-emoji.txt)
+  https://github.com/microsoft/fluentui-emoji – cupcake, candy, lollipop, dizzy, glowing star, star, growing heart,
+  pink heart, sparkling heart, sparkles, rainbow, zzz, musical notes, cloud, collision, microphone, unicorn (128/192 px WebP)
+
+Particle textures (fx/) – "Particle Pack" by Kenney – CC0   https://kenney.nl/assets/particle-pack
+  circle_05, light_01, magic_02, magic_05, star_04, star_06, star_07, star_08, twirl_02, flare_01 (128 px)
+
+Sound effects (sfx/) – freesound.org, all CC0 (trimmed, normalised, mono MP3)
+- giggle.mp3   "child giggle" by RaspberryTickle            https://freesound.org/s/203230/
+- giggle2.mp3  "giggle4.wav" by Reitanna                    https://freesound.org/s/235165/
+- pop.mp3      "Bubble Pop" by TheBuilder15                 https://freesound.org/s/411462/
+- pop2.mp3     "Bubble Pop" by Mafon2                       https://freesound.org/s/253956/
+- sparkle.mp3  "Item Sparkle" by Mr._Fritz_                 https://freesound.org/s/545238/
+- sparkle2.mp3 "cartoon_wink_magic_sparkle.wav" by MLaudio  https://freesound.org/s/511485/
+- magic.mp3    "Cliche Magic Spell Sound" by qubodup        https://freesound.org/s/817466/
+- magic2.mp3   "Fairy Dust Magic" by jacksonacademyashmore  https://freesound.org/s/440716/
+- munch.mp3    "Apple Munch.wav" by GentlemanWalrus         https://freesound.org/s/518049/
+- bonk.mp3     "Bonk.wav" by facklere                       https://freesound.org/s/458572/
+- boing.mp3    "Boing 2" by magnuswaker                     https://freesound.org/s/540790/
+- dizzy.mp3    "classic dizzy take slide whistle.wav" by martian  https://freesound.org/s/403002/
+- snore.mp3    "SNORING" by studiogreenhill                 https://freesound.org/s/774670/
+- sleep.mp3    "Sleep" by LilMati                           https://freesound.org/s/528254/
+- yawn.mp3     "Yawn 1" by OwlStorm                         https://freesound.org/s/151240/
+- neigh.mp3    "horse neigh shortened.wav" by shadoWisp     https://freesound.org/s/269571/
+- nicker.mp3   "Horses - Soft Nicker" by TheKingOfGeeks360  https://freesound.org/s/861234/
+- kiss.mp3     "kisses" by lantiphon                        https://freesound.org/s/419020/
+
+Music (music/) – freesound.org, CC0
+- loop.mp3     "(Loop) By the Sea" by plasterbrain          https://freesound.org/s/464918/
+- loop2.mp3    "short ukulele loop by rea.mp3" by reasanka  https://freesound.org/s/383023/
