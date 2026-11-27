@@ -1,0 +1,25 @@
+עולם הפוך (Flip) – asset credits
+All assets in this folder are public domain (CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/).
+Credit is not required, but given with thanks.
+
+GRAPHICS
+- Kenney (www.kenney.nl) – "New Platformer Pack" v1.1 (CC0): terrain tiles, items, characters, enemies, backgrounds.
+  atlas/world.png, atlas/chars.png, bg/*, ui/* are repacked / resized / layer-separated from that pack.
+  ui/arrow.png, ui/star_empty.png and the lockzone_arrow / lockzone_tile atlas frames are simple shapes/recolours
+  generated from it by our build script (also CC0).
+- Kenney (www.kenney.nl) – "Particle Pack" (CC0): atlas/fx.png (resized, brightened to white for tinting).
+
+SOUND EFFECTS (audio/*.mp3 except music_*) – trimmed, peak-normalised, mono 96 kbps
+- Kenney – "New Platformer Pack" sounds (CC0): jump, gem, coin, key, spring, death, flip, poof, select, bump
+- Kenney – "Impact Sounds" (CC0): land, unlock, crumble, stomp, push, step
+- Kenney – "Interface Sounds" (CC0): click, back, toggle, door
+- Kenney – "Music Jingles" (CC0): win (Steel jingle 02), lose (Pizzicato 01), star (Pizzicato 16)
+
+MUSIC (CC0, from OpenGameArt.org)
+- audio/music_grass.mp3 – "Happy Adventure (Loop)" by TinyWorlds – https://opengameart.org/content/happy-adventure-loop
+- audio/music_stone.mp3 – "Crystal Cave (song18)" by cynicmusic – https://opengameart.org/content/crystal-cave-song18
+- audio/music_sky.mp3   – "Happy Lullaby (song17)" by cynicmusic – https://opengameart.org/content/happy-lullaby-song17
+- audio/music_menu.mp3  – "Snowfall" (looped version) by Kistol – https://opengameart.org/content/snowfall
+  (re-encoded to mp3 96 kbps, +6 dB)
+
+Licence texts: LICENSE-kenney.txt, LICENSE-CC0.txt

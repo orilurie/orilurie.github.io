@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>עולם הפוך – ערב משחקים</title>
+<meta name="description" content="עולם הפוך – משחק פלטפורמה שבו מטים את הטלפון והכבידה מתהפכת">
+<link rel="icon" type="image/png" href="icons/favicon-64.png?v=49">
+<link rel="manifest" href="manifest.webmanifest?v=49">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=49">
+<meta name="theme-color" content="#5fb4ff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="flip.css?v=54">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js" id="phaser-js" async></script>
+</head>
+<body class="flip">
+<div id="scenery" aria-hidden="true">
+  <div class="sc-layer sc-sky"></div>
+  <div class="sc-layer sc-clouds"></div>
+  <div class="sc-layer sc-far"></div>
+  <div class="sc-layer sc-near"></div>
+  <div class="sc-ground"></div>
+</div>
+<main id="app"></main>
+<div id="stage" hidden></div>
+<div id="hud" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript><p style="padding:20px">צריך JavaScript כדי לשחק.</p></noscript>
+<script type="module" src="flip-ui.js?v=54"></script>
+</body>
+</html>

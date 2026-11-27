@@ -3,8 +3,8 @@
 // give one clue each in turn, then vote for who they think the imposter is. A caught imposter
 // gets a last chance: guess the word from 8 options.
 
-import { shuffle, fairOrder } from './util.js?v=53';
-import { WORDS } from './imposter-words.js?v=53';
+import { shuffle, fairOrder } from './util.js?v=54';
+import { WORDS } from './imposter-words.js?v=54';
 
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 6;
